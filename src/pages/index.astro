@@ -1,66 +1,24 @@
 ---
 import Layout from '@layouts/Layout.astro';
-import Button from '@components/Button/Button.astro';
-import Wysiwyg from '@components/Wysiwyg/Wysiwyg.astro';
-import Accordion from '@components/Accordion/Accordion.astro';
+import '@scripts/webgpu/web-component/webgpu-canvas.css';
 ---
 
-<Layout title="Welcome to the Locomotive Astro Boilerplate.">
-    <header class="container">
-        <h1 class="heading-lg">Welcome to the Locomotive Astro Boilerplate.</h1>
-    </header>
-
-    <div class="container mt-fluid-xl">
-        <div class="grid grid-cols-12 gap-gutter">
-            <div class="text-body col-span-full md:col-span-4">
-                <Wysiwyg>
-                    <Fragment
-                        set:html={`<p>Lorem, ipsum dolor sit amet consectetur adipisicing elit. Itaque quam, nam omnis sunt laudantium tenetur obcaecati? Inventore eos vitae id repellat cum possimus voluptates nam voluptatum, assumenda, atque nesciunt debitis?</p>`}
-                    />
-                </Wysiwyg>
-
-                <Button href="/about" class="mt-fluid-sm"> Learn More </Button>
-            </div>
-
-            <div class="col-span-full text-body-sm md:col-span-4">
-                <Wysiwyg tag="article">
-                    <Fragment
-                        set:html={`<p>Lorem, ipsum dolor sit amet consectetur adipisicing elit. Itaque quam, nam omnis sunt laudantium tenetur obcaecati? Inventore eos vitae id repellat cum possimus voluptates nam voluptatum, assumenda, atque nesciunt debitis?</p>`}
-                    />
-                    <Button href="https://google.ca" target="_blank" class="mt-fluid-sm">
-                        Visit Us
-                    </Button>
-                </Wysiwyg>
-            </div>
-
-            <div class="col-span-full text-body-sm md:col-span-4">
-                <Wysiwyg>
-                    <Fragment
-                        set:html={`<p>Lorem, ipsum dolor sit amet consectetur adipisicing elit. Itaque quam, nam omnis sunt laudantium tenetur obcaecati? Inventore eos vitae id repellat cum possimus voluptates nam voluptatum, assumenda, atque nesciunt debitis?</p>`}
-                    />
-                </Wysiwyg>
-            </div>
-
-            <div class="col-span-full text-body-sm md:col-span-4">
-                <Accordion label="Accordion summary">
-                    <Wysiwyg>
-                        <Fragment
-                            set:html={`<p>Lorem, ipsum dolor sit amet consectetur adipisicing elit. Itaque quam, nam omnis sunt laudantium tenetur obcaecati? Inventore eos vitae id repellat cum possimus voluptates nam voluptatum, assumenda, atque nesciunt debitis?</p>`}
-                        />
-                    </Wysiwyg>
-                </Accordion>
-                <Accordion label="Accordion summary">
-                    <Wysiwyg>
-                        <Fragment
-                            set:html={`<p>Lorem, ipsum dolor sit amet consectetur adipisicing elit. Itaque quam, nam omnis sunt laudantium tenetur obcaecati? Inventore eos vitae id repellat cum possimus voluptates nam voluptatum, assumenda, atque nesciunt debitis?</p>`}
-                        />
-                    </Wysiwyg>
-                </Accordion>
-            </div>
-        </div>
-
-        <!-- Placeholder -->
-        <div class="mt-fluid-xl h-[50vh] w-full bg-black opacity-50"></div>
-        <div class="bg-grey mt-fluid-xl h-[50vh] w-full"></div>
+<Layout title="WebGPU">
+    <div class="h-[70vh] w-full">
+        <c-webgpu-canvas data-component-id="TslCube"></c-webgpu-canvas>
     </div>
 </Layout>
+
+<script>
+    import { $CanvasManager } from '@scripts/webgpu/core/CanvasManager';
+    import { TslCube } from '@scripts/webgpu/components/TslCube/TslCube';
+
+    if (!$CanvasManager.has(TslCube.id)) {
+        $CanvasManager.register(TslCube.id, TslCube);
+    }
+
+    await $CanvasManager.init();
+    $CanvasManager.start();
+
+    await import('@scripts/webgpu/web-component');
+</script>

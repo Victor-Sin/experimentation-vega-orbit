@@ -40,6 +40,7 @@
         "nanostores": "^1.0.1",
         "swup": "^4.8.1",
         "tailwindcss": "^4.2.1",
+        "three": "^0.186.1",
         "ts-debounce": "^4.0.0",
         "typescript": "^5.9.3"
     },
@@ -47,6 +48,7 @@
         "@locomotivemtl/postcss-helpers-functions": "^1.0.4",
         "@locomotivemtl/postcss-tailwind-shortcuts": "^2.0.1",
         "@tailwindcss/postcss": "^4.2.1",
+        "@types/three": "^0.186.0",
         "postcss-utopia": "^1.1.0",
         "prettier": "^3.6.2",
         "prettier-plugin-astro": "^0.14.1",

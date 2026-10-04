@@ -30,6 +30,9 @@ export default defineConfig({
                 ]
             }
         },
+        resolve: {
+            alias: [{ find: /^three$/, replacement: 'three/webgpu' }]
+        },
         optimizeDeps: {
             include: [
                 '@locomotivemtl/grid-helper',
@@ -39,7 +42,10 @@ export default defineConfig({
                 '@swup/preload-plugin',
                 '@swup/scripts-plugin',
                 'swup',
-                'nanostores'
+                'nanostores',
+                'three',
+                'three/webgpu',
+                'three/tsl'
             ]
         },
         build: {
