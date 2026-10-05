@@ -2,7 +2,23 @@ import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Inspector } from 'three/addons/inspector/Inspector.js';
 import type { Tab } from 'three/addons/inspector/ui/Tab.js';
-import { mix, screenUV, uniform } from 'three/tsl';
+import {
+    Fn,
+    HALF_PI,
+    PI2,
+    cos,
+    float,
+    instanceIndex,
+    mix,
+    mod,
+    positionLocal,
+    screenUV,
+    select,
+    sin,
+    uniform,
+    uv,
+    vec3
+} from 'three/tsl';
 
 import { $mediaStatus } from '@scripts/stores/deviceStatus';
 
@@ -14,9 +30,26 @@ enum TypeShape {
     circle = 'circle'
 }
 
+const TypeShapeUniform = {
+    row: 0,
+    circle: 1
+} as const;
+
 const backgroundInner = uniform(new THREE.Color(0x2b3240));
 const backgroundOuter = uniform(new THREE.Color(0x0b0d12));
-const yAxis = new THREE.Vector3(0, 1, 0);
+/** Local cylindrical bend radius (object space X). Larger = flatter. */
+const bendRadius = uniform(0.75);
+/** 1 = bend amount follows layout distance (row/circle); 0 = full bend always. */
+const uBendByDistance = uniform(1);
+
+const uCount = uniform(6);
+const uGap = uniform(2);
+const uSize = uniform(0.25);
+const uProgress = uniform(0.5);
+const uType = uniform(TypeShapeUniform.row);
+const uRadiusX = uniform(0);
+const uRadiusY = uniform(0);
+const udistanceFactor = uniform(1);
 
 export class TslCube extends WebgpuComponent {
     static id = 'TslCube';
@@ -31,7 +64,6 @@ export class TslCube extends WebgpuComponent {
     private geometry!: THREE.PlaneGeometry;
     private material!: THREE.MeshBasicNodeMaterial;
     private mesh!: THREE.InstancedMesh;
-    private dummyMesh!: THREE.Object3D;
     private controls: OrbitControls | null = null;
     private inspector: Inspector | null = null;
     private readonly indexColor = new THREE.Color();
@@ -45,7 +77,7 @@ export class TslCube extends WebgpuComponent {
     private readonly instanceParameters = {
         count: 6,
         gap: 2,
-        size: 0.25,
+        size: 1,
         type: TypeShape.row,
         circle: {
             radiusX: 0,
@@ -58,7 +90,11 @@ export class TslCube extends WebgpuComponent {
         direction: 'forward',
         loop: true,
         speed: 1,
-        progress: 0
+        progress: 0.5
+    };
+
+    private readonly bendParameters = {
+        byDistance: true
     };
 
     constructor() {
@@ -147,17 +183,26 @@ export class TslCube extends WebgpuComponent {
         this.camera = new THREE.PerspectiveCamera(45, this.resolution.ratio, 0.1, 100);
         this.camera.position.set(0, 0, 1);
 
-        // Unit quad: instance size is a scale on the matrix, so the slider can change it live
-        this.geometry = new THREE.PlaneGeometry(1, 1);
+        this.camera.lookAt(0, 0, 0);
+
+        this.geometry = new THREE.PlaneGeometry(1, 1, 32, 1);
 
         this.material = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
-
-        this.dummyMesh = new THREE.Object3D();
+        this.applyPositionNode();
 
         this.mesh = new THREE.InstancedMesh(this.geometry, this.material, TslCube.maxInstanceCount);
+        this.mesh.position.set(0, 0, 0);
+        this.mesh.rotation.y = 0;
         this.scene.add(this.mesh);
 
-        this.updateInstances();
+        const identity = new THREE.Matrix4();
+        for (let i = 0; i < TslCube.maxInstanceCount; i++) {
+            this.mesh.setMatrixAt(i, identity);
+        }
+        this.mesh.instanceMatrix.needsUpdate = true;
+
+        this.syncLayoutUniforms();
+        this.paintIndexColors();
 
         this.isInitialized = true;
     }
@@ -168,51 +213,30 @@ export class TslCube extends WebgpuComponent {
         this.scene?.clear();
     }
 
-    private updateInstances(): void {
-        const { count, size, type } = this.instanceParameters;
-
-        this.mesh.count = count;
-        this.dummyMesh.scale.set(size, size, 1);
-
-        // Le mesh global reste fixe à l'origine (0, 0, 0)
-        this.mesh.position.set(0, 0, 0);
-
-        if (type === TypeShape.circle) {
-            this.updateCircle();
-        } else {
-            this.updateRow();
-        }
-
-        this.paintIndexColors();
-        this.mesh.instanceMatrix.needsUpdate = true;
-        this.mesh.computeBoundingSphere();
-    }
-
-    private updateRow(): void {
-        const { count, gap } = this.instanceParameters;
+    private syncLayoutUniforms(): void {
+        const { count, gap, size, type, circle } = this.instanceParameters;
         const { progress } = this.animationParameters;
 
-        this.mesh.rotation.y = 0;
-        this.dummyMesh.quaternion.identity();
+        uCount.value = count;
+        uGap.value = gap;
+        uSize.value = size;
+        uProgress.value = progress;
+        uType.value = type === TypeShape.circle ? TypeShapeUniform.circle : TypeShapeUniform.row;
+        uRadiusX.value = circle.radiusX;
+        uRadiusY.value = circle.radiusY;
+        uBendByDistance.value = this.bendParameters.byDistance ? 1 : 0;
 
-        const totalWidth = count * gap;
-        const halfWidth = totalWidth / 2;
-        const translateX = Math.sin(progress * Math.PI * 2) * halfWidth;
-
-        for (let i = 0; i < count; i++) {
-            const rawX = i * gap + translateX;
-
-            // First add tmp offset to the rawX to avoid negative values then take the modulo
-            let wrappedX = (rawX + halfWidth) % totalWidth;
-            if (wrappedX < 0) {
-                // If the wrappedX is negative, add the totalWidth to it to make it positive
-                wrappedX += totalWidth;
-            }
-            // Then subtract the halfWidth to center the wrappedX
-            wrappedX -= halfWidth;
-
-            this.placeInstance(i, wrappedX, 0, 0);
+        if (this.mesh) {
+            this.mesh.count = count;
         }
+    }
+
+    /**
+     * Refresh GPU layout uniforms from inspector state, then colors + bounds.
+     */
+    private refreshLayout(): void {
+        this.syncLayoutUniforms();
+        this.paintIndexColors();
     }
 
     /**
@@ -233,29 +257,53 @@ export class TslCube extends WebgpuComponent {
         }
     }
 
-    private placeInstance(index: number, x: number, y: number, z: number): void {
-        this.dummyMesh.position.set(x, y, z);
-        this.dummyMesh.updateMatrix();
-        this.mesh.setMatrixAt(index, this.dummyMesh.matrix);
-    }
+    /**
+     * Local cylindrical bend + per-instance layout offset, all in the vertex stage.
+     * Instance matrices stay identity; scale is applied here via uSize.
+     */
+    private applyPositionNode(): void {
+        this.material.positionNode = Fn(() => {
+            const i = float(instanceIndex);
+            const isCircle = uType.equal(TypeShapeUniform.circle);
 
-    private updateCircle(): void {
-        const { count, gap, circle } = this.instanceParameters;
-        const { progress } = this.animationParameters;
+            // Row: wrap along X
+            const totalWidth = uCount.mul(uGap);
+            const halfWidth = totalWidth.div(2);
+            const translateX = uProgress.mul(2).sub(1).mul(totalWidth).mul(3);
+            const rawX = i.negate().mul(uGap).add(translateX);
+            const wrappedX = mod(rawX.add(halfWidth), totalWidth).sub(halfWidth);
+            const rowOffset = vec3(wrappedX, 0, 0);
+            const rowDistance = wrappedX.abs();
 
-        this.mesh.rotation.y = 0;
-        this.dummyMesh.quaternion.setFromAxisAngle(yAxis, Math.PI);
+            // Circle: index 0 at (0, -Z); progress rotates toward +X
+            const progressAngle = uProgress.mul(PI2);
+            const radiusX = uRadiusX.add(uGap);
+            const radiusZ = uRadiusY.add(uGap);
+            const angle = HALF_PI.negate().sub(i.div(uCount).mul(PI2)).add(progressAngle);
+            const baseOffset = vec3(0, 0, radiusZ.negate());
+            const circleOffset = vec3(cos(angle).mul(radiusX), 0, sin(angle).mul(radiusZ));
+            const distanceCircle = baseOffset.distance(circleOffset);
 
-        const turn = progress * Math.PI * 2;
-        const cosTurn = Math.cos(turn);
-        const sinTurn = Math.sin(turn);
+            const offset = select(isCircle, circleOffset, rowOffset);
 
-        for (let i = 0; i < count; i++) {
-            const angle = (i / count) * Math.PI * 2;
-            const x = Math.cos(angle) * (circle.radiusX + gap);
-            const z = Math.sin(angle) * (circle.radiusY + gap);
-            this.placeInstance(i, x * cosTurn + z * sinTurn, 0, -x * sinTurn + z * cosTurn);
-        }
+            // Distance amount adapts to mode: |x|/halfWidth (row) or front chord (circle)
+            const maxDistance = select(isCircle, float(2).mul(radiusX.max(radiusZ)), halfWidth);
+            const distanceAmount = select(isCircle, distanceCircle, rowDistance)
+                .div(maxDistance.max(1e-5))
+                .clamp(0, 1);
+            // Toggle: by-distance (mode-aware) vs full bend everywhere
+            const amount = select(uBendByDistance.equal(1), distanceAmount, float(1)).mul(
+                udistanceFactor
+            );
+
+            // X/Y stay flat (stable scale); only Z curvature is driven by amount
+            const uvX = uv().x.sub(0.5);
+            const theta = uvX.div(bendRadius);
+            const bendZ = float(1).sub(cos(theta)).mul(bendRadius).mul(amount).negate();
+            const shaped = vec3(uvX, positionLocal.y, bendZ.negate());
+
+            return shaped.mul(uSize).add(offset);
+        })();
     }
 
     private mountInspector(): void {
@@ -267,37 +315,61 @@ export class TslCube extends WebgpuComponent {
 
         const parameters = inspector.createParameters('Cube');
 
-        const refreshInstances = () => this.updateInstances();
+        const refreshLayout = () => this.refreshLayout();
 
         parameters
             .add(this.instanceParameters, 'count', 6, TslCube.maxInstanceCount, 1)
             .name('Instance count')
-            .onChange(refreshInstances);
+            .onChange(refreshLayout);
         parameters
             .add(this.instanceParameters, 'gap', 0, 5, 0.1)
             .name('Instance gap')
-            .onChange(refreshInstances);
+            .onChange(refreshLayout);
         parameters
-            .add(this.instanceParameters, 'size', 0, 1, 0.01)
+            .add(this.instanceParameters, 'size', 0, 2, 0.01)
             .name('Instance size')
-            .onChange(refreshInstances);
+            .onChange(refreshLayout);
         // A select needs an options object. Two extra strings are ignored and the control stays a text field.
         const radiusX = parameters
             .add(this.instanceParameters.circle, 'radiusX', 0, 1, 0.01)
             .name('Circle radius X')
-            .onChange(refreshInstances)
+            .onChange(refreshLayout)
             .hide();
 
         const radiusY = parameters
             .add(this.instanceParameters.circle, 'radiusY', 0, 1, 0.01)
             .name('Circle radius Y')
-            .onChange(refreshInstances)
+            .onChange(refreshLayout)
             .hide();
 
         parameters
             .add(this.animationParameters, 'progress', 0, 1, 0.01)
             .name('Progress')
-            .onChange(refreshInstances);
+            .onChange(refreshLayout);
+
+        const bend = { radius: bendRadius.value as number };
+        parameters
+            .add(bend, 'radius', 0.15, 10, 0.01)
+            .name('Bend radius')
+            .onChange((value: number) => {
+                bendRadius.value = value;
+            });
+
+        const distanceFactor = { factor: udistanceFactor.value as number };
+        parameters
+            .add(distanceFactor, 'factor', 0, 2, 0.01)
+            .name('Distance bend factor')
+            .onChange((value: number) => {
+                udistanceFactor.value = value;
+            });
+
+        parameters
+            .add(this.bendParameters, 'byDistance')
+            .name('Bend by distance')
+            .onChange((value: boolean) => {
+                this.bendParameters.byDistance = value;
+                uBendByDistance.value = value ? 1 : 0;
+            });
 
         parameters
             .add(this.instanceParameters, 'type', {
@@ -306,7 +378,7 @@ export class TslCube extends WebgpuComponent {
             })
             .name('Instance type')
             .onChange((type: TypeShape) => {
-                refreshInstances();
+                refreshLayout();
                 if (type === TypeShape.circle) {
                     radiusX.show();
                     radiusY.show();
@@ -318,31 +390,5 @@ export class TslCube extends WebgpuComponent {
 
         const withTabs = inspector as Inspector & { parameters: Tab };
         inspector.setActiveTab(withTabs.parameters);
-
-        // Three appends the inspector inside the canvas, which sits in a scrolled,
-        // clipped box. Pin it to the viewport and force the panel open.
-        this.placeInspector(inspector);
-        requestAnimationFrame(() => this.placeInspector(inspector));
-    }
-
-    private placeInspector(inspector: Inspector): void {
-        const root = inspector.domElement;
-        if (root.parentElement !== document.body) {
-            document.body.appendChild(root);
-        }
-
-        root.style.position = 'fixed';
-        root.style.inset = '0';
-        root.style.zIndex = '1000';
-
-        root.querySelector('.profiler-panel')?.classList.add('visible');
-        root.querySelector('.profiler-toggle')?.classList.add('panel-open');
-    }
-
-    private unmountInspector(): void {
-        if (!this.inspector) return;
-
-        this.renderer.inspector = new THREE.InspectorBase();
-        this.inspector = null;
     }
 }
