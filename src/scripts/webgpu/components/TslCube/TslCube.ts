@@ -1,108 +1,156 @@
 import * as THREE from 'three/webgpu';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Inspector } from 'three/addons/inspector/Inspector.js';
-import type { Tab } from 'three/addons/inspector/ui/Tab.js';
 import {
     Fn,
-    HALF_PI,
-    PI2,
+    PI,
+    atan,
     cos,
     float,
-    instanceIndex,
     mix,
-    mod,
+    pass,
     positionLocal,
-    screenUV,
     select,
-    sin,
+    sqrt,
+    texture,
     uniform,
     uv,
-    vec3
+    vec2,
+    vec3,
+    vec4
 } from 'three/tsl';
 
 import { $mediaStatus } from '@scripts/stores/deviceStatus';
 
 import type { CanvasManagerClock } from '../../core/CanvasManager.ts';
+import { clamp } from '../../utils/maths.ts';
 import { WebgpuComponent } from '../../webgpu/WebgpuComponent.ts';
+import {
+    DEFAULT_PRESET,
+    DEFAULT_SHAPE,
+    MIN_PLANE_COUNT,
+    SHAPE_PRESETS,
+    TypeShape
+} from './TslCube.config.ts';
 
-enum TypeShape {
-    row = 'row',
-    circle = 'circle'
-}
+// ----------------------------------------------
+// Shared TSL uniforms (runtime)
+// ----------------------------------------------
 
-const TypeShapeUniform = {
-    row: 0,
-    circle: 1
-} as const;
-
-const backgroundInner = uniform(new THREE.Color(0x2b3240));
-const backgroundOuter = uniform(new THREE.Color(0x0b0d12));
 /** Local cylindrical bend radius (object space X). Larger = flatter. */
-const bendRadius = uniform(0.75);
+const bendRadius = uniform(DEFAULT_PRESET.bend.radius);
 /** 1 = bend amount follows layout distance (row/circle); 0 = full bend always. */
-const uBendByDistance = uniform(1);
+const uBendByDistance = uniform(DEFAULT_PRESET.bend.byDistance ? 1 : 0);
+const udistanceFactor = uniform(DEFAULT_PRESET.bend.distanceFactor);
+/** 1 = bend on; 0 = flat planes. */
+const uBendEnabled = uniform(DEFAULT_PRESET.bend.enabled ? 1 : 0);
 
-const uCount = uniform(6);
-const uGap = uniform(2);
-const uSize = uniform(0.25);
-const uProgress = uniform(0.5);
-const uType = uniform(TypeShapeUniform.row);
-const uRadiusX = uniform(0);
-const uRadiusY = uniform(0);
-const udistanceFactor = uniform(1);
+/** 0 → 1 fade from placeholder color to loaded texture. */
+const uTextureFade = uniform(0);
+
+const TEXTURE_FADE_DURATION = 0.6;
+
+/**
+ * Post fisheye (Shadertoy wtt3z2 / cafe ll2GWV).
+ * Negative = barrel (fisheye), positive = pincushion.
+ */
+const uFisheyeEnabled = uniform(DEFAULT_PRESET.fisheye.enabled ? 1 : 0);
+const uFisheyeEffect = uniform(DEFAULT_PRESET.fisheye.effect);
+const uFisheyeScale = uniform(DEFAULT_PRESET.fisheye.scale);
+
+type FloatUniform = ReturnType<typeof uniform>;
 
 export class TslCube extends WebgpuComponent {
     static id = 'TslCube';
 
-    /** Matches the inspector slider. InstancedMesh cannot grow past its allocated count. */
-    private static readonly maxInstanceCount = 20;
-
     public id = TslCube.id;
+
+    // ----------------------------------------------
+    // Scene graph
+    // ----------------------------------------------
 
     private scene!: THREE.Scene;
     private camera!: THREE.PerspectiveCamera;
     private geometry!: THREE.PlaneGeometry;
-    private material!: THREE.MeshBasicNodeMaterial;
-    private mesh!: THREE.InstancedMesh;
-    private controls: OrbitControls | null = null;
-    private inspector: Inspector | null = null;
-    private readonly indexColor = new THREE.Color();
+    private group!: THREE.Group;
+    private RenderPipeline!: THREE.RenderPipeline;
+    private readonly meshes: THREE.Mesh[] = [];
+    private readonly distanceUniforms: FloatUniform[] = [];
+    private readonly layoutOffset = new THREE.Vector3();
 
-    private readonly motion = {
-        spin: true,
-        speedX: 0.3,
-        speedY: 0.5
-    };
+    // ----------------------------------------------
+    // Textures
+    // ----------------------------------------------
 
-    private readonly instanceParameters = {
-        count: 6,
-        gap: 2,
-        size: 1,
-        type: TypeShape.row,
-        circle: {
-            radiusX: 0,
-            radiusY: 0
-        }
-    };
+    private readonly textureCache = new Map<string, THREE.Texture>();
+    /** Shared stub map when `data-src-images` is empty. */
+    private emptyMap: THREE.Texture | null = null;
+    private planeImageUrls: string[] = [];
+    private readonly textureLoader = new THREE.TextureLoader();
+    /** True once at least one plane texture has finished loading. */
+    private textureReady = false;
 
-    private readonly animationParameters = {
-        easing: 'ease-in-out',
-        direction: 'forward',
-        loop: true,
-        speed: 1,
-        progress: 0.5
+    // ----------------------------------------------
+    // Runtime parameters (defaults from config; DEV inspector mutates these)
+    // ----------------------------------------------
+
+    private readonly planeParameters = {
+        count: MIN_PLANE_COUNT,
+        gap: DEFAULT_PRESET.gap,
+        size: DEFAULT_PRESET.size,
+        type: DEFAULT_SHAPE,
+        circle: { ...DEFAULT_PRESET.circle }
     };
 
     private readonly bendParameters = {
-        byDistance: true
+        enabled: DEFAULT_PRESET.bend.enabled,
+        radius: DEFAULT_PRESET.bend.radius,
+        distanceFactor: DEFAULT_PRESET.bend.distanceFactor,
+        byDistance: DEFAULT_PRESET.bend.byDistance
     };
+
+    private readonly cameraParameters = {
+        zOffset: DEFAULT_PRESET.camera.zOffset
+    };
+
+    private readonly postParameters = {
+        enabled: DEFAULT_PRESET.fisheye.enabled,
+        /** Negative = barrel (fisheye), positive = pincushion. */
+        effect: DEFAULT_PRESET.fisheye.effect,
+        scale: DEFAULT_PRESET.fisheye.scale
+    };
+
+    // ----------------------------------------------
+    // Scroll / motion
+    // ----------------------------------------------
+
+    private readonly scroll = {
+        idleSpeed: 0.007,
+        influence: 0.01,
+        damping: 6,
+        /** Combined layout progress (0.5 = centered). */
+        progress: 0.5,
+        lastDirection: 1 as 1 | -1,
+        currentRate: 0,
+        velocity: 0,
+        lastY: 0,
+        /** Idle phase from `scopedElapsedTime` deltas. */
+        idleProgress: 0,
+        /** Scroll phase from damped velocity rate. */
+        scrollProgress: 0,
+        lastScopedElapsedMs: 0
+    };
+
+    // ----------------------------------------------
+    // DEV-only (disposed on unmount; never imported in production)
+    // ----------------------------------------------
+
+    private unmountDevtools: (() => void) | null = null;
 
     constructor() {
         super({ id: TslCube.id, renderer: { antialias: true, alpha: false } });
     }
 
     // ----------------------------------------------
-    // Scene
+    // Lifecycle
     // ----------------------------------------------
 
     public override onRendererPooled(): void {
@@ -111,20 +159,33 @@ export class TslCube extends WebgpuComponent {
     }
 
     public override onMounted(): void {
-        // OrbitControls listens on the canvas, which only exists once the renderer is pooled
-        this.controls = new OrbitControls(this.camera, this.canvas);
-        this.controls.enableDamping = true;
-        this.controls.enablePan = false;
-        this.controls.minDistance = 2;
-        this.controls.maxDistance = 8;
-
-        this.mountInspector();
+        if (import.meta.env.DEV) {
+            void this.mountDevtools();
+        }
     }
 
     public override onUnmounted(): void {
-        this.controls?.dispose();
-        this.controls = null;
-        this.unmountInspector();
+        this.unmountDevtools?.();
+        this.unmountDevtools = null;
+    }
+
+    public override onBindEvents(): void {
+        this.scroll.lastY = window.scrollY;
+        super.onBindEvents();
+    }
+
+    public override onIntersect(isIntersecting: boolean): void {
+        if (!isIntersecting) {
+            this.scroll.velocity = 0;
+            this.scroll.currentRate = 0;
+        }
+    }
+
+    public override onWheel(event: WheelEvent): void {
+        if (!this.isIntersecting || event.deltaY === 0) return;
+
+        this.scroll.lastDirection = event.deltaY > 0 ? 1 : -1;
+        this.scroll.velocity += event.deltaY;
     }
 
     public override onResize(): void {
@@ -134,18 +195,60 @@ export class TslCube extends WebgpuComponent {
     }
 
     public override onUpdate({ deltaTime }: CanvasManagerClock): void {
-        if (this.motion.spin && !$mediaStatus.get().isReducedMotion) {
-            // The ticker reports milliseconds
-            // const seconds = deltaTime * 0.001;
-            // this.mesh.rotation.x += seconds * this.motion.speedX;
-            // this.mesh.rotation.y += seconds * this.motion.speedY;
+        if (!this.isInitialized) {
+            return;
         }
 
-        this.controls?.update();
+        const dtSeconds = deltaTime * 0.001;
+        const { idleSpeed, influence, damping } = this.scroll;
+        const reducedMotion = $mediaStatus.get().isReducedMotion;
+
+        const scrollY = window.scrollY;
+        const scrollDelta = scrollY - this.scroll.lastY;
+        this.scroll.lastY = scrollY;
+
+        if (scrollDelta > 0) this.scroll.lastDirection = 1;
+        else if (scrollDelta < 0) this.scroll.lastDirection = -1;
+
+        const scopedDtSeconds = (this.scopedElapsedTime - this.scroll.lastScopedElapsedMs) * 0.001;
+        this.scroll.lastScopedElapsedMs = this.scopedElapsedTime;
+
+        // Idle advances on the instance clock (pauses when inactive, resets on pool release).
+        if (!reducedMotion && scopedDtSeconds > 0) {
+            this.scroll.idleProgress += idleSpeed * this.scroll.lastDirection * scopedDtSeconds;
+        }
+
+        // Prefer native scroll delta; wheel impulses fill gaps (touchpad inertia / Lenis frames).
+        if (scrollDelta !== 0) {
+            this.scroll.velocity = scrollDelta;
+        } else {
+            this.scroll.velocity *= Math.exp(-damping * dtSeconds);
+        }
+
+        const velocity = !reducedMotion ? this.scroll.velocity : 0;
+        const targetRate = velocity * influence;
+        const lerpFactor = 1 - Math.exp(-damping * dtSeconds);
+        this.scroll.currentRate += (targetRate - this.scroll.currentRate) * lerpFactor;
+        this.scroll.scrollProgress += this.scroll.currentRate * dtSeconds;
+
+        // 0.5 keeps the strip centered when idle/scroll contributions are zero.
+        this.scroll.progress = 0.5 + this.scroll.idleProgress + this.scroll.scrollProgress;
+        this.syncLayout();
+
+        if (this.textureReady && uTextureFade.value < 1) {
+            if (reducedMotion) {
+                uTextureFade.value = 1;
+            } else {
+                uTextureFade.value = Math.min(
+                    1,
+                    uTextureFade.value + dtSeconds / TEXTURE_FADE_DURATION
+                );
+            }
+        }
     }
 
     public override onRender(): void {
-        this.renderer.render(this.scene, this.camera);
+        this.RenderPipeline.render();
     }
 
     // ----------------------------------------------
@@ -172,223 +275,350 @@ export class TslCube extends WebgpuComponent {
     }
 
     // ----------------------------------------------
-    // Private
+    // Scene setup
     // ----------------------------------------------
 
     private setupScene(): void {
         this.scene = new THREE.Scene();
-        // A node can drive the background directly, without a mesh to carry it
-        this.scene.backgroundNode = mix(backgroundInner, backgroundOuter, screenUV.distance(0.5));
+        this.planeImageUrls = this.parseSrcImages();
+        if (this.planeImageUrls.length === 0) {
+            this.warn('No images in data-src-images; planes will be untextured.');
+        }
+
+        const planeCount = Math.max(this.planeImageUrls.length, MIN_PLANE_COUNT);
+        this.planeParameters.count = planeCount;
 
         this.camera = new THREE.PerspectiveCamera(45, this.resolution.ratio, 0.1, 100);
-        this.camera.position.set(0, 0, 1);
 
-        this.camera.lookAt(0, 0, 0);
+        this.geometry = new THREE.PlaneGeometry(1, 1, 16, 1);
+        this.group = new THREE.Group();
+        this.scene.add(this.group);
 
-        this.geometry = new THREE.PlaneGeometry(1, 1, 32, 1);
+        this.meshes.length = 0;
+        this.distanceUniforms.length = 0;
+        this.disposeTextureCache();
+        this.textureReady = false;
+        uTextureFade.value = 0;
+        this.scroll.idleProgress = 0;
+        this.scroll.scrollProgress = 0;
+        this.scroll.lastScopedElapsedMs = 0;
+        this.scroll.currentRate = 0;
+        this.scroll.velocity = 0;
+        this.scroll.progress = 0.5;
 
-        this.material = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
-        this.applyPositionNode();
-
-        this.mesh = new THREE.InstancedMesh(this.geometry, this.material, TslCube.maxInstanceCount);
-        this.mesh.position.set(0, 0, 0);
-        this.mesh.rotation.y = 0;
-        this.scene.add(this.mesh);
-
-        const identity = new THREE.Matrix4();
-        for (let i = 0; i < TslCube.maxInstanceCount; i++) {
-            this.mesh.setMatrixAt(i, identity);
+        for (let i = 0; i < planeCount; i++) {
+            const { material, uDistance } = this.createPlaneMaterial(i);
+            const mesh = new THREE.Mesh(this.geometry, material);
+            this.distanceUniforms.push(uDistance);
+            this.meshes.push(mesh);
+            this.group.add(mesh);
         }
-        this.mesh.instanceMatrix.needsUpdate = true;
 
-        this.syncLayoutUniforms();
-        this.paintIndexColors();
+        this.syncLayout();
+        this.applyCameraOffset();
+        this.setupPostProcessing();
 
         this.isInitialized = true;
     }
 
     private disposeScene(): void {
+        this.RenderPipeline?.dispose();
         this.geometry?.dispose();
-        this.material?.dispose();
+        for (const mesh of this.meshes) {
+            (mesh.material as THREE.Material).dispose();
+        }
+        this.disposeTextureCache();
+        this.emptyMap?.dispose();
+        this.emptyMap = null;
+        this.meshes.length = 0;
+        this.distanceUniforms.length = 0;
+        this.planeImageUrls = [];
+        this.textureReady = false;
+        uTextureFade.value = 0;
         this.scene?.clear();
     }
 
-    private syncLayoutUniforms(): void {
-        const { count, gap, size, type, circle } = this.instanceParameters;
-        const { progress } = this.animationParameters;
+    // ----------------------------------------------
+    // Data attributes
+    // ----------------------------------------------
 
-        uCount.value = count;
-        uGap.value = gap;
-        uSize.value = size;
-        uProgress.value = progress;
-        uType.value = type === TypeShape.circle ? TypeShapeUniform.circle : TypeShapeUniform.row;
-        uRadiusX.value = circle.radiusX;
-        uRadiusY.value = circle.radiusY;
-        uBendByDistance.value = this.bendParameters.byDistance ? 1 : 0;
+    /** Reads `data-src-images` (JSON array or comma-separated URLs). */
+    private parseSrcImages(): string[] {
+        const raw = this.datas['src-images']?.trim();
+        if (!raw) return [];
 
-        if (this.mesh) {
-            this.mesh.count = count;
-        }
-    }
-
-    /**
-     * Refresh GPU layout uniforms from inspector state, then colors + bounds.
-     */
-    private refreshLayout(): void {
-        this.syncLayoutUniforms();
-        this.paintIndexColors();
-    }
-
-    /**
-     * Red channel only. Index 0 is 0, the last index is 255,
-     * and each step adds 255 / (count - 1).
-     */
-    private paintIndexColors(): void {
-        const { count } = this.instanceParameters;
-        const step = count > 1 ? 1 / (count - 1) : 0;
-
-        for (let i = 0; i < count; i++) {
-            this.indexColor.setRGB(i * step, 0, 0);
-            this.mesh.setColorAt(i, this.indexColor);
+        try {
+            const parsed: unknown = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                return parsed.filter(
+                    (value): value is string => typeof value === 'string' && value.length > 0
+                );
+            }
+        } catch {
+            // Fall through to comma-separated parsing
         }
 
-        if (this.mesh.instanceColor) {
-            this.mesh.instanceColor.needsUpdate = true;
-        }
+        return raw
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean);
     }
 
+    // ----------------------------------------------
+    // Textures
+    // ----------------------------------------------
+
     /**
-     * Local cylindrical bend + per-instance layout offset, all in the vertex stage.
-     * Instance matrices stay identity; scale is applied here via uSize.
+     * Visible plane count. Clamped to `[MIN_PLANE_COUNT, meshes.length]`.
+     * When there are fewer images than the pool size, textures repeat via index modulo.
      */
-    private applyPositionNode(): void {
-        this.material.positionNode = Fn(() => {
-            const i = float(instanceIndex);
-            const isCircle = uType.equal(TypeShapeUniform.circle);
+    private getEffectivePlaneCount(): number {
+        return clamp(this.planeParameters.count, MIN_PLANE_COUNT, this.meshes.length);
+    }
 
-            // Row: wrap along X
-            const totalWidth = uCount.mul(uGap);
-            const halfWidth = totalWidth.div(2);
-            const translateX = uProgress.mul(2).sub(1).mul(totalWidth).mul(3);
-            const rawX = i.negate().mul(uGap).add(translateX);
-            const wrappedX = mod(rawX.add(halfWidth), totalWidth).sub(halfWidth);
-            const rowOffset = vec3(wrappedX, 0, 0);
-            const rowDistance = wrappedX.abs();
+    private disposeTextureCache(): void {
+        for (const map of Array.from(this.textureCache.values())) {
+            map.dispose();
+        }
+        this.textureCache.clear();
+    }
 
-            // Circle: index 0 at (0, -Z); progress rotates toward +X
-            const progressAngle = uProgress.mul(PI2);
-            const radiusX = uRadiusX.add(uGap);
-            const radiusZ = uRadiusY.add(uGap);
-            const angle = HALF_PI.negate().sub(i.div(uCount).mul(PI2)).add(progressAngle);
-            const baseOffset = vec3(0, 0, radiusZ.negate());
-            const circleOffset = vec3(cos(angle).mul(radiusX), 0, sin(angle).mul(radiusZ));
-            const distanceCircle = baseOffset.distance(circleOffset);
+    private ensureSharedTexture(url: string): THREE.Texture {
+        const cached = this.textureCache.get(url);
+        if (cached) return cached;
 
-            const offset = select(isCircle, circleOffset, rowOffset);
+        const map = this.textureLoader.load(
+            url,
+            () => {
+                this.textureReady = true;
+            },
+            undefined,
+            () => {
+                this.warn(`Failed to load texture: ${url}`);
+            }
+        );
+        map.colorSpace = THREE.SRGBColorSpace;
+        this.textureCache.set(url, map);
+        return map;
+    }
 
-            // Distance amount adapts to mode: |x|/halfWidth (row) or front chord (circle)
-            const maxDistance = select(isCircle, float(2).mul(radiusX.max(radiusZ)), halfWidth);
-            const distanceAmount = select(isCircle, distanceCircle, rowDistance)
-                .div(maxDistance.max(1e-5))
-                .clamp(0, 1);
-            // Toggle: by-distance (mode-aware) vs full bend everywhere
-            const amount = select(uBendByDistance.equal(1), distanceAmount, float(1)).mul(
-                udistanceFactor
-            );
+    private createPlaneMaterial(index: number): {
+        material: THREE.MeshBasicNodeMaterial;
+        uDistance: FloatUniform;
+    } {
+        const uDistance = uniform(0);
+        const material = new THREE.MeshBasicNodeMaterial({
+            transparent: true
+        });
 
-            // X/Y stay flat (stable scale); only Z curvature is driven by amount
+        const urls = this.planeImageUrls;
+        const url = urls.length > 0 ? urls[index % urls.length] : undefined;
+        let map: THREE.Texture;
+        if (url) {
+            map = this.ensureSharedTexture(url);
+        } else {
+            this.emptyMap ??= new THREE.Texture();
+            map = this.emptyMap;
+        }
+
+        // Bend only — element position/scale live on the mesh transform
+        material.positionNode = Fn(() => {
+            const amount = select(uBendByDistance.equal(1), uDistance, float(1))
+                .mul(udistanceFactor)
+                .mul(uBendEnabled);
+
             const uvX = uv().x.sub(0.5);
             const theta = uvX.div(bendRadius);
             const bendZ = float(1).sub(cos(theta)).mul(bendRadius).mul(amount).negate();
-            const shaped = vec3(uvX, positionLocal.y, bendZ.negate());
-
-            return shaped.mul(uSize).add(offset);
+            return vec3(uvX, positionLocal.y, bendZ.negate());
         })();
+
+        material.colorNode = Fn(() => {
+            const mapNode = texture(map, uv());
+            const circle = uv().distance(0.5).add(0.25).step(0.75).oneMinus();
+            const placeholderColor = vec4(0.588, 0.588, 0.588, circle);
+            const imageColor = vec4(mapNode.rgb, mapNode.a.mul(circle));
+
+            return mix(placeholderColor, imageColor, uTextureFade);
+        })();
+
+        return { material, uDistance };
     }
 
-    private mountInspector(): void {
-        if (this.inspector) return;
+    // ----------------------------------------------
+    // Layout
+    // ----------------------------------------------
 
-        const inspector = new Inspector();
-        this.renderer.inspector = inspector;
-        this.inspector = inspector;
+    private syncLayout(): void {
+        const { gap, size, type, circle } = this.planeParameters;
+        const count = this.getEffectivePlaneCount();
+        const { progress } = this.scroll;
+        const isCircle = type === TypeShape.circle;
 
-        const parameters = inspector.createParameters('Cube');
+        uBendByDistance.value = this.bendParameters.byDistance ? 1 : 0;
+        uBendEnabled.value = this.bendParameters.enabled ? 1 : 0;
 
-        const refreshLayout = () => this.refreshLayout();
+        const totalWidth = count * gap;
+        const halfWidth = totalWidth / 2;
+        const translateX = (progress * 2 - 1) * totalWidth * 3;
 
-        parameters
-            .add(this.instanceParameters, 'count', 6, TslCube.maxInstanceCount, 1)
-            .name('Instance count')
-            .onChange(refreshLayout);
-        parameters
-            .add(this.instanceParameters, 'gap', 0, 5, 0.1)
-            .name('Instance gap')
-            .onChange(refreshLayout);
-        parameters
-            .add(this.instanceParameters, 'size', 0, 2, 0.01)
-            .name('Instance size')
-            .onChange(refreshLayout);
-        // A select needs an options object. Two extra strings are ignored and the control stays a text field.
-        const radiusX = parameters
-            .add(this.instanceParameters.circle, 'radiusX', 0, 1, 0.01)
-            .name('Circle radius X')
-            .onChange(refreshLayout)
-            .hide();
+        for (let i = 0; i < this.meshes.length; i++) {
+            const mesh = this.meshes[i];
+            const visible = i < count;
+            mesh.visible = visible;
 
-        const radiusY = parameters
-            .add(this.instanceParameters.circle, 'radiusY', 0, 1, 0.01)
-            .name('Circle radius Y')
-            .onChange(refreshLayout)
-            .hide();
+            if (!visible) continue;
 
-        parameters
-            .add(this.animationParameters, 'progress', 0, 1, 0.01)
-            .name('Progress')
-            .onChange(refreshLayout);
+            const wrappedX = this.getWrappedRowX(i, gap, translateX, totalWidth);
 
-        const bend = { radius: bendRadius.value as number };
-        parameters
-            .add(bend, 'radius', 0.15, 10, 0.01)
-            .name('Bend radius')
-            .onChange((value: number) => {
-                bendRadius.value = value;
-            });
+            if (isCircle) {
+                this.setCircleOffset(wrappedX, circle.radiusX, circle.radiusY);
+            } else {
+                this.layoutOffset.set(wrappedX, 0, 0);
+            }
 
-        const distanceFactor = { factor: udistanceFactor.value as number };
-        parameters
-            .add(distanceFactor, 'factor', 0, 2, 0.01)
-            .name('Distance bend factor')
-            .onChange((value: number) => {
-                udistanceFactor.value = value;
-            });
+            mesh.position.copy(this.layoutOffset);
+            mesh.scale.setScalar(size);
 
-        parameters
-            .add(this.bendParameters, 'byDistance')
-            .name('Bend by distance')
-            .onChange((value: boolean) => {
-                this.bendParameters.byDistance = value;
-                uBendByDistance.value = value ? 1 : 0;
-            });
+            if (isCircle && circle.faceInward && this.layoutOffset.lengthSq() > 1e-8) {
+                mesh.lookAt(0, 0, 0);
+            } else {
+                mesh.rotation.set(0, 0, 0);
+            }
 
-        parameters
-            .add(this.instanceParameters, 'type', {
-                Row: TypeShape.row,
-                Circle: TypeShape.circle
-            })
-            .name('Instance type')
-            .onChange((type: TypeShape) => {
-                refreshLayout();
-                if (type === TypeShape.circle) {
-                    radiusX.show();
-                    radiusY.show();
-                } else {
-                    radiusX.hide();
-                    radiusY.hide();
-                }
-            });
+            this.distanceUniforms[i].value = clamp(
+                Math.abs(wrappedX) / Math.max(halfWidth, 1e-5),
+                0,
+                1
+            );
+        }
+    }
 
-        const withTabs = inspector as Inspector & { parameters: Tab };
-        inspector.setActiveTab(withTabs.parameters);
+    /** Wrap plane index onto a centered row strip of width `totalWidth`. */
+    private getWrappedRowX(
+        index: number,
+        gap: number,
+        translateX: number,
+        totalWidth: number
+    ): number {
+        const halfWidth = totalWidth / 2;
+        const rawX = -index * gap + translateX;
+        const wrapped = (((rawX + halfWidth) % totalWidth) + totalWidth) % totalWidth;
+        return wrapped - halfWidth;
+    }
+
+    /** Project wrapped row X onto a fixed XZ ellipse (front at -Z). Gap stays stable vs count. */
+    private setCircleOffset(wrappedX: number, radiusX: number, radiusY: number): void {
+        const arcRadius = Math.max((radiusX + radiusY) * 0.5, 1e-5);
+        const angle = -Math.PI / 2 + wrappedX / arcRadius;
+        this.layoutOffset.set(Math.cos(angle) * radiusX, 0, Math.sin(angle) * radiusY);
+    }
+
+    /** Apply base layout / bend / camera / fisheye values for the given plane type. */
+    private applyShapePreset(type: TypeShape): void {
+        const preset = SHAPE_PRESETS[type];
+
+        this.planeParameters.gap = preset.gap;
+        this.planeParameters.size = preset.size;
+        this.planeParameters.type = type;
+        this.planeParameters.circle.radiusX = preset.circle.radiusX;
+        this.planeParameters.circle.radiusY = preset.circle.radiusY;
+        this.planeParameters.circle.faceInward = preset.circle.faceInward;
+
+        this.bendParameters.enabled = preset.bend.enabled;
+        this.bendParameters.radius = preset.bend.radius;
+        this.bendParameters.distanceFactor = preset.bend.distanceFactor;
+        this.bendParameters.byDistance = preset.bend.byDistance;
+        bendRadius.value = preset.bend.radius;
+        udistanceFactor.value = preset.bend.distanceFactor;
+        uBendEnabled.value = preset.bend.enabled ? 1 : 0;
+        uBendByDistance.value = preset.bend.byDistance ? 1 : 0;
+
+        this.cameraParameters.zOffset = preset.camera.zOffset;
+
+        this.postParameters.enabled = preset.fisheye.enabled;
+        this.postParameters.effect = preset.fisheye.effect;
+        this.postParameters.scale = preset.fisheye.scale;
+        uFisheyeEnabled.value = preset.fisheye.enabled ? 1 : 0;
+        uFisheyeEffect.value = preset.fisheye.effect;
+        uFisheyeScale.value = preset.fisheye.scale;
+
+        this.syncLayout();
+        this.applyCameraOffset();
+    }
+
+    /**
+     * Place the camera on Z at `zOffset`, looking toward -Z.
+     * Target is relative to the camera so the facing stays stable when zOffset changes.
+     */
+    private applyCameraOffset(): void {
+        if (!this.camera) return;
+
+        const z = this.cameraParameters.zOffset;
+        const targetZ = z - 1;
+
+        this.camera.up.set(0, 1, 0);
+        this.camera.position.set(0, 0, z);
+
+        this.camera.lookAt(0, 0, targetZ);
+    }
+
+    // ----------------------------------------------
+    // Post-processing
+    // ----------------------------------------------
+
+    private setupPostProcessing(): void {
+        this.RenderPipeline = new THREE.RenderPipeline(this.renderer);
+
+        const scenePass = pass(this.scene, this.camera);
+        const scenePassColor = scenePass.getTextureNode().toInspector('Scene Color');
+
+        uFisheyeEnabled.value = this.postParameters.enabled ? 1 : 0;
+        uFisheyeEffect.value = this.postParameters.effect;
+        uFisheyeScale.value = this.postParameters.scale;
+
+        const fisheyeUV = Fn(() => {
+            const screen = uv();
+            const x = screen.x.mul(2).sub(1);
+            const d = x.abs();
+            const z = sqrt(float(1).add(d.mul(d).mul(uFisheyeEffect)).max(1e-5));
+            const r = atan(d, z).div(PI).mul(uFisheyeScale);
+            const distortedX = r.mul(x.sign()).add(0.5);
+            const distorted = vec2(distortedX, screen.y);
+
+            return select(uFisheyeEnabled.equal(1), distorted, screen);
+        })();
+
+        this.RenderPipeline.outputNode = scenePassColor.sample(fisheyeUV).toInspector('Fisheye');
+    }
+
+    // ----------------------------------------------
+    // DEV-only helpers (dead-code eliminated when import.meta.env.DEV is false)
+    // ----------------------------------------------
+
+    private async mountDevtools(): Promise<void> {
+        const { mountTslCubeInspector } = await import('./TslCube.devtools.ts');
+        this.unmountDevtools?.();
+        this.unmountDevtools = mountTslCubeInspector({
+            renderer: this.renderer,
+            limits: { minPlaneCount: MIN_PLANE_COUNT, maxPlaneCount: this.meshes.length },
+            planeParameters: this.planeParameters,
+            scroll: this.scroll,
+            bendParameters: this.bendParameters,
+            cameraParameters: this.cameraParameters,
+            postParameters: this.postParameters,
+            uniforms: {
+                bendRadius,
+                uBendByDistance,
+                udistanceFactor,
+                uBendEnabled,
+                uFisheyeEnabled,
+                uFisheyeEffect,
+                uFisheyeScale
+            },
+            applyShapePreset: (type) => this.applyShapePreset(type),
+            syncLayout: () => this.syncLayout(),
+            applyCameraOffset: () => this.applyCameraOffset()
+        });
     }
 }

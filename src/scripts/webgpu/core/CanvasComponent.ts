@@ -53,6 +53,7 @@ export class CanvasComponent {
         onResize: createHook<Resolution>(),
         onInit: createHook<void>(),
         onIntersect: createHook<boolean>(),
+        onWheel: createHook<WheelEvent>(),
         onContextLost: createHook<void>(),
         onContextRestored: createHook<void>(),
         onBeforeUpdate: createHook<void>(),
@@ -170,6 +171,11 @@ export class CanvasComponent {
         this.isIntersecting = isVisible;
         this.onIntersect(isVisible);
         this.hooks.onIntersect.emit(isVisible);
+    };
+
+    private readonly _onWheel = (event: WheelEvent): void => {
+        this.onWheel(event);
+        this.hooks.onWheel.emit(event);
     };
 
     // ----------------------------------------------
@@ -340,8 +346,12 @@ export class CanvasComponent {
     // ----------------------------------------------
 
     public setViewportResize(_resolution: Resolution): void {}
-    public onBindEvents(): void {}
-    public onUnbindEvents(): void {}
+    public onBindEvents(): void {
+        window.addEventListener('wheel', this._onWheel, { passive: true });
+    }
+    public onUnbindEvents(): void {
+        window.removeEventListener('wheel', this._onWheel);
+    }
     public onResize(_force?: boolean): void {}
     public onMounted(_parent: HTMLElement): void {}
     public onAfterMounted(_parent: HTMLElement): void {}
@@ -350,6 +360,7 @@ export class CanvasComponent {
     public onRender(_: CanvasManagerClock): void {}
     public onDestroy(): void {}
     public onIntersect(_isIntersecting: boolean): void {}
+    public onWheel(_event: WheelEvent): void {}
     public onContextLost(): void {}
     public onContextRestored(): void {}
     public onRendererPooled(): void {}

@@ -1,11 +1,66 @@
 ---
 import Layout from '@layouts/Layout.astro';
 import '@scripts/webgpu/web-component/webgpu-canvas.css';
+
+import img0 from '@images/tsl/img-0.jpg';
+import img1 from '@images/tsl/img-1.jpg';
+import img2 from '@images/tsl/img-2.jpg';
+import img3 from '@images/tsl/img-3.jpg';
+import img4 from '@images/tsl/img-4.jpg';
+import img5 from '@images/tsl/img-5.jpg';
+import img6 from '@images/tsl/img-6.jpg';
+import img7 from '@images/tsl/img-7.jpg';
+import img8 from '@images/tsl/img-8.jpg';
+import img9 from '@images/tsl/img-9.jpg';
+import img10 from '@images/tsl/img-10.jpg';
+import img11 from '@images/tsl/img-11.jpg';
+import img12 from '@images/tsl/img-12.jpg';
+import img13 from '@images/tsl/img-13.jpg';
+import img14 from '@images/tsl/img-14.jpg';
+import img15 from '@images/tsl/img-15.jpg';
+import img16 from '@images/tsl/img-16.jpg';
+import img17 from '@images/tsl/img-17.jpg';
+import img18 from '@images/tsl/img-18.jpg';
+import img19 from '@images/tsl/img-19.jpg';
+
+const srcImages = [
+    img0,
+    img1,
+    img2,
+    img3,
+    img4,
+    img5,
+    img6,
+    img7,
+    img8,
+    img9,
+    img10,
+    img11,
+    img12,
+    img13,
+    img14,
+    img15,
+    img16,
+    img17,
+    img18,
+    img19
+].map((image) => image.src);
 ---
 
 <Layout title="WebGPU">
-    <div class="h-[100vh] w-full">
-        <c-webgpu-canvas data-component-id="TslCube"></c-webgpu-canvas>
+    <div
+        class="relative h-[1000vh] w-full"
+        data-scroll
+        data-scroll-event-progress="canvas-progress"
+    >
+        <div class="sticky top-0 h-screen w-full">
+            <c-webgpu-canvas data-component-id="TslCube" data-src-images={JSON.stringify(srcImages)}
+            ></c-webgpu-canvas>
+            <div
+                class="absolute top-1/2 left-1/2 h-[80%] w-48 -translate-x-1/2 -translate-y-1/2 rounded-md border bg-white"
+            >
+            </div>
+        </div>
     </div>
 </Layout>
 

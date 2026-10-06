@@ -7,6 +7,7 @@ import { stableKey, type RendererEntry, type RendererEntryData } from '../core/R
 // WebGPURenderer constructor defaults that define context identity (mirror of three's own defaults)
 const WEBGPU_KEY_DEFAULTS = {
     alpha: true,
+    premultipliedAlpha: false,
     depth: true,
     stencil: false,
     antialias: false,
@@ -67,6 +68,7 @@ export class WebgpuComponent extends CanvasComponent {
         // WebGPURenderer only adopts a canvas that it receives in its options
         const canvas = document.createElement('canvas');
         const renderer = new THREE.WebGPURenderer({ canvas, ...this._rendererOptions });
+        renderer.setClearColor(0xffffff, 0);
 
         await renderer.init();
 
