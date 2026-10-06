@@ -96,11 +96,4 @@ export class CanvasElement extends HTMLElement {
     }
 }
 
-// A distinct tag and component name: `webgl/` already claimed `c-loco-canvas` and `CanvasElement`,
-// and a second registration under either name throws once both folders are loaded.
-if (!customElements.get('c-webgpu-canvas')) {
-    customElements.define(
-        'c-webgpu-canvas',
-        ComponentElement(CanvasElement, 'WebgpuCanvasElement')
-    );
-}
+customElements.define('c-loco-canvas', ComponentElement(CanvasElement, 'CanvasElement'));

@@ -1,6 +1,6 @@
-import type { Logger } from '../utils/logger.ts';
-import { useScreen, type UseScreenInstance } from '../utils/screen.ts';
-import { lcfirst } from '../utils/string.ts';
+import type { Logger } from '#utils/log/logger.ts';
+import { useScreen, type UseScreenInstance } from '#utils/screen/useScreen.ts';
+import { lcfirst } from '#utils/string.ts';
 
 import type { CanvasComponent } from './CanvasComponent.ts';
 
@@ -496,5 +496,5 @@ export class $CanvasManager {
 
 // Add $CanvasManager to window context for debug purposes
 if (IS_CLIENT) {
-    (window as any).__WEBGPU_MANAGER__ = $CanvasManager;
+    (window as any).__CANVAS_MANAGER__ = $CanvasManager;
 }

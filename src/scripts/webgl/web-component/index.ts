@@ -1,3 +1,3 @@
-import './webgpu-canvas.css';
+import './loco-canvas.css';
 
 export { CanvasElement } from './CanvasElement.ts';

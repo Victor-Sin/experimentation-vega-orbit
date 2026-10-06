@@ -3,6 +3,6 @@
 
 declare namespace astroHTML.JSX {
     interface IntrinsicElements {
-        'c-webgpu-canvas': astroHTML.JSX.HTMLAttributes;
+        'c-loco-canvas': astroHTML.JSX.HTMLAttributes;
     }
 }

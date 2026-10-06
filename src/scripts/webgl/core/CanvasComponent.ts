@@ -1,7 +1,8 @@
-import { createLogger, type Logger } from '../utils/logger.ts';
-import { useDPR, useResize, type UseDPRInstance, type UseResizeInstance } from '../utils/screen.ts';
-import { createUUID } from '../utils/string.ts';
-import { nextTick } from '../utils/wait.ts';
+import { nextTick } from '#utils/async/wait.ts';
+import { createLogger, type Logger } from '#utils/log/logger.ts';
+import { useDPR, type UseDPRInstance } from '#utils/screen/useDPR.ts';
+import { useResize, type UseResizeInstance } from '#utils/screen/useResize.ts';
+import { createUUID } from '#utils/string.ts';
 
 import { $CanvasManager, type CanvasManagerClock, type Resolution } from './CanvasManager.ts';
 
@@ -234,9 +235,10 @@ export class CanvasComponent {
         this.resizeWatcher = useResize(parent, { onDebouncedUpdate: this.handleResize });
         this.dprWatcher = useDPR(this.handleDPR);
 
-        this.intersectionObserver = new IntersectionObserver(this._onIntersect, {
-            rootMargin: '100px'
-        });
+        this.intersectionObserver = new IntersectionObserver(
+            this._onIntersect,
+            this.getIntersectionObserverOptions()
+        );
         this.intersectionObserver.observe(parent);
 
         await nextTick();
@@ -346,6 +348,12 @@ export class CanvasComponent {
     // ----------------------------------------------
 
     public setViewportResize(_resolution: Resolution): void {}
+
+    /** Default: fire a bit early (`rootMargin`) as soon as any pixel intersects. */
+    public getIntersectionObserverOptions(): IntersectionObserverInit {
+        return { rootMargin: '100px' };
+    }
+
     public onBindEvents(): void {
         window.addEventListener('wheel', this._onWheel, { passive: true });
     }

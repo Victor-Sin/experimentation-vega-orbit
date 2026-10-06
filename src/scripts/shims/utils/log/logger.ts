@@ -16,5 +16,3 @@ export function createLogger({ id, color }: { id: string; color?: string }): Log
         error: (...args) => console.error(tag, style, ...args)
     };
 }
-
-export const $CanvasManagerLogger = createLogger({ id: 'WebGPUManager', color: '#820A9A' });
