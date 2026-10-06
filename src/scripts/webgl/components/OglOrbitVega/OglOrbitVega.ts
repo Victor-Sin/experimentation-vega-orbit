@@ -26,7 +26,7 @@ import {
     DEFAULT_SHAPE,
     MIN_PLANE_COUNT,
     SHAPE_PRESETS,
-    TypeShape
+    ShapeType
 } from './OglOrbitVega.config.ts';
 import { circleOffset, wrapRowX } from './orbitLayout.ts';
 
@@ -41,11 +41,26 @@ const fisheyeSource = fisheyeFragment.replace(
     `precision highp float;\n${colorspaceParsFragment}`
 );
 
+/**
+ * 3D carousel section for another site.
+ * Ref: https://next.frame.io/share/eab99cde-6841-47a6-8f46-cf84543e4724/568cc94a-20a9-4ed4-b93d-3a780a164f9c
+ *
+ * Images: `data-src-images` = JSON string[] (Shopify); `[]` → placeholder.
+ * Scroll: native (`scrollY` + `wheel`) — no Locomotive Scroll in this project.
+ *
+ * @example
+ * ```html
+ * <c-loco-canvas
+ *   data-component-id="OglOrbitVega"
+ *   data-src-images='["https://…/a.jpg","https://…/b.jpg"]'>
+ * </c-loco-canvas>
+ * ```
+ */
 export class OglOrbitVega extends OglComponent {
     static id = 'OglOrbitVega';
 
     /** Toggle lil-gui inspector + gl-perf overlay. */
-    static readonly DEBUG = false;
+    static readonly DEBUG = true;
 
     static readonly logger: Logger = createLogger({ id: OglOrbitVega.id, color: '#222' });
     static readonly log: Logger['log'] = OglOrbitVega.logger.log;
@@ -55,7 +70,10 @@ export class OglOrbitVega extends OglComponent {
     public id = OglOrbitVega.id;
 
     static readonly FADE_DURATION = 0.6;
+    /** Min planes for visual coverage / no gaps; URLs repeat (`i % length`) if fewer images. */
     static readonly MIN_PLANE_COUNT = MIN_PLANE_COUNT;
+    /** Default for `scroll.travel` — how many strip widths progress spans while scrolling. */
+    static readonly SCROLL_TRAVEL = 3;
 
     private scene!: Transform;
     private camera!: Camera;
@@ -68,7 +86,7 @@ export class OglOrbitVega extends OglComponent {
     private readonly offset = new Vec3();
     private readonly textureCache = new Map<string, Texture>();
 
-    private emptyMap: Texture | null = null;
+    private fallbackTexture: Texture | null = null;
     private imageUrls: string[] = [];
     private textureReady = false;
 
@@ -81,25 +99,26 @@ export class OglOrbitVega extends OglComponent {
     };
 
     public bend = { ...DEFAULT_PRESET.bend };
-    public view = { zOffset: DEFAULT_PRESET.camera.zOffset };
+    public cameraOffset = { zOffset: DEFAULT_PRESET.cameraOffset.zOffset };
     public fisheye = { ...DEFAULT_PRESET.fisheye, fxaa: true };
 
     public scroll = {
         idleSpeed: 0.007,
         influence: 0.01,
         damping: 6,
-        progress: 0.5
+        progress: 0.5,
+        travel: OglOrbitVega.SCROLL_TRAVEL
     };
 
     private direction = 1 as 1 | -1;
-    private velocity = 0;
-    private rate = 0;
-    private idle = 0;
-    private scrolled = 0;
+    private scrollDelta = 0;
+    private scrollRate = 0;
+    private idleProgress = 0;
+    private scrollProgress = 0;
     private lastScrollY = 0;
     private lastScopedMs = 0;
 
-    /** Scroll / wheel velocity only counts when the host is fully in view. Idle always runs. */
+    /** Scroll/wheel acceleration only when fully in view; idle always runs. */
     private isFullyVisible = false;
     private fullVisibilityObserver?: IntersectionObserver;
 
@@ -151,10 +170,12 @@ export class OglOrbitVega extends OglComponent {
     }
 
     public override onWheel(event: WheelEvent): void {
+        // Native wheel complements scrollY (useful at scroll bounds / overscroll). No Locomotive Scroll here.
         if (!this.isFullyVisible || event.deltaY === 0) return;
+        if ($device.get().isReducedMotion) return;
 
         this.direction = event.deltaY > 0 ? 1 : -1;
-        this.velocity += event.deltaY;
+        this.scrollDelta += event.deltaY;
     }
 
     public override onUpdate(clock: CanvasManagerClock): void {
@@ -163,37 +184,43 @@ export class OglOrbitVega extends OglComponent {
         if (!this.isInitialized) return;
 
         const dt = clock.deltaTime * 0.001;
+        // reduced-motion: stop user acceleration only; idle keeps running.
         const reduced = $device.get().isReducedMotion;
 
-        // Discard scroll deltas while partially off-screen so entering doesn't spike velocity.
+        // Always sample scrollY so re-entering fully-visible doesn't spike from a large gap.
         const delta = window.scrollY - this.lastScrollY;
         this.lastScrollY = window.scrollY;
         const scopedDt = (this.scopedElapsedTime - this.lastScopedMs) * 0.001;
         this.lastScopedMs = this.scopedElapsedTime;
+        const damp = Math.exp(-this.scroll.damping * dt);
 
         if (!reduced) {
             if (this.isFullyVisible) {
                 if (delta > 0) this.direction = 1;
                 else if (delta < 0) this.direction = -1;
 
-                // Accept new scroll input only while fully visible.
-                if (delta !== 0) this.velocity = delta;
-                else this.velocity *= Math.exp(-this.scroll.damping * dt);
+                // Accept new scroll input only while fully visible (scrollY overwrites wheel when both fire).
+                if (delta !== 0) this.scrollDelta = delta;
+                else this.scrollDelta *= damp;
             } else {
                 // Keep damping leftover velocity after leaving the viewport.
-                this.velocity *= Math.exp(-this.scroll.damping * dt);
+                this.scrollDelta *= damp;
             }
 
-            const lerp = 1 - Math.exp(-this.scroll.damping * dt);
-            this.rate += (this.velocity * this.scroll.influence - this.rate) * lerp;
-            this.scrolled += this.rate * dt;
-
-            if (scopedDt > 0) {
-                this.idle += this.scroll.idleSpeed * this.direction * scopedDt;
-            }
+            const lerp = 1 - damp;
+            this.scrollRate += (this.scrollDelta * this.scroll.influence - this.scrollRate) * lerp;
+            this.scrollProgress += this.scrollRate * dt;
+        } else {
+            // Decay any leftover user acceleration without accepting new input.
+            this.scrollDelta *= damp;
+            this.scrollRate *= damp;
         }
 
-        this.scroll.progress = 0.5 + this.idle + this.scrolled;
+        if (scopedDt > 0) {
+            this.idleProgress += this.scroll.idleSpeed * this.direction * scopedDt;
+        }
+
+        this.scroll.progress = 0.5 + this.idleProgress + this.scrollProgress;
         this.syncLayout();
 
         if (this.textureReady && this.uniforms.uTextureFade.value < 1) {
@@ -257,9 +284,10 @@ export class OglOrbitVega extends OglComponent {
         this.imageUrls = this.parseSrcImages();
 
         if (this.imageUrls.length === 0) {
-            OglOrbitVega.warn('No images in data-src-images; planes will be untextured.');
+            OglOrbitVega.warn('No images in data-src-images; planes will use placeholder.');
         }
 
+        // At least MIN_PLANE_COUNT for coverage; repeat URL pattern when fewer images.
         const count = Math.max(this.imageUrls.length, OglOrbitVega.MIN_PLANE_COUNT);
         this.planes.count = count;
 
@@ -279,11 +307,11 @@ export class OglOrbitVega extends OglComponent {
         this.disposeTextures();
         this.textureReady = false;
         this.uniforms.uTextureFade.value = 0;
-        this.idle = 0;
-        this.scrolled = 0;
+        this.idleProgress = 0;
+        this.scrollProgress = 0;
         this.lastScopedMs = 0;
-        this.rate = 0;
-        this.velocity = 0;
+        this.scrollRate = 0;
+        this.scrollDelta = 0;
         this.scroll.progress = 0.5;
 
         for (let i = 0; i < count; i++) {
@@ -304,7 +332,9 @@ export class OglOrbitVega extends OglComponent {
                         uBendEnabled: this.uniforms.uBendEnabled,
                         uDistance,
                         uTextureFade: this.uniforms.uTextureFade,
-                        uMap: { value: url ? this.ensureTexture(url) : this.createEmptyMap() }
+                        uMap: {
+                            value: url ? this.ensureTexture(url) : this.createFallbackTexture()
+                        }
                     }
                 })
             });
@@ -326,9 +356,9 @@ export class OglOrbitVega extends OglComponent {
         for (const mesh of this.meshes) this.deleteProgram(mesh.program);
         this.disposeTextures();
 
-        if (this.emptyMap) {
-            this.ctx.deleteTexture(this.emptyMap.texture);
-            this.emptyMap = null;
+        if (this.fallbackTexture) {
+            this.ctx.deleteTexture(this.fallbackTexture.texture);
+            this.fallbackTexture = null;
         }
 
         this.meshes.length = 0;
@@ -394,14 +424,14 @@ export class OglOrbitVega extends OglComponent {
         return map;
     }
 
-    private createEmptyMap(): Texture {
-        if (this.emptyMap) return this.emptyMap;
+    private createFallbackTexture(): Texture {
+        if (this.fallbackTexture) return this.fallbackTexture;
 
-        this.emptyMap = new Texture(this.ctx, {
+        this.fallbackTexture = new Texture(this.ctx, {
             generateMipmaps: false
         });
 
-        return this.emptyMap;
+        return this.fallbackTexture;
     }
 
     public syncLayout(): void {
@@ -421,8 +451,9 @@ export class OglOrbitVega extends OglComponent {
         );
         const totalWidth = count * gap;
         const halfWidth = totalWidth / 2;
-        const translateX = (this.scroll.progress * 2 - 1) * totalWidth * 3;
-        const onCircle = type === TypeShape.circle;
+        // `scroll.travel`: progress spans several strip widths so the carousel loops more during page scroll.
+        const translateX = (this.scroll.progress * 2 - 1) * totalWidth * this.scroll.travel;
+        const onCircle = type === ShapeType.circle;
 
         for (let i = 0; i < this.meshes.length; i++) {
             const mesh = this.meshes[i];
@@ -451,7 +482,7 @@ export class OglOrbitVega extends OglComponent {
         }
     }
 
-    public applyShapePreset(type: TypeShape): void {
+    public applyShapePreset(type: ShapeType): void {
         const preset = SHAPE_PRESETS[type];
 
         this.planes.gap = preset.gap;
@@ -459,7 +490,7 @@ export class OglOrbitVega extends OglComponent {
         this.planes.type = type;
         Object.assign(this.planes.circle, preset.circle);
         Object.assign(this.bend, preset.bend);
-        this.view.zOffset = preset.camera.zOffset;
+        this.cameraOffset.zOffset = preset.cameraOffset.zOffset;
         Object.assign(this.fisheye, preset.fisheye);
 
         this.syncLayout();
@@ -469,7 +500,7 @@ export class OglOrbitVega extends OglComponent {
     public placeCamera(): void {
         if (!this.camera) return;
 
-        const z = this.view.zOffset;
+        const z = this.cameraOffset.zOffset;
         this.camera.position.set(0, 0, z);
         this.camera.lookAt([0, 0, z - 1]);
     }

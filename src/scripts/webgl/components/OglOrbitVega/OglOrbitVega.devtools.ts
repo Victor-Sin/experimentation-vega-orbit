@@ -1,12 +1,12 @@
 import GUI from 'lil-gui';
 
-import { MIN_PLANE_COUNT, TypeShape } from './OglOrbitVega.config.ts';
+import { MIN_PLANE_COUNT, ShapeType } from './OglOrbitVega.config.ts';
 import type { OglOrbitVega } from './OglOrbitVega.ts';
 
 /** lil-gui parameter panel — DEV only. */
 export function mountOglOrbitVegaInspector(host: OglOrbitVega): () => void {
     const gui = new GUI({ title: 'Cube' });
-    const { planes, scroll, bend, view, fisheye } = host;
+    const { planes, scroll, bend, cameraOffset, fisheye } = host;
 
     const layout = gui.addFolder('Layout');
     const circle = gui.addFolder('Circle');
@@ -34,7 +34,7 @@ export function mountOglOrbitVegaInspector(host: OglOrbitVega): () => void {
         .name('Face inward')
         .onChange(refresh);
 
-    if (planes.type !== TypeShape.circle) {
+    if (planes.type !== ShapeType.circle) {
         radiusX.hide();
         radiusY.hide();
         faceInward.hide();
@@ -48,11 +48,11 @@ export function mountOglOrbitVegaInspector(host: OglOrbitVega): () => void {
     layout.add(planes, 'gap', 0, 1, 0.01).name('Plane gap').onChange(refreshView).listen();
     layout.add(planes, 'size', 0, 2, 0.01).name('Plane size').onChange(refresh).listen();
     layout
-        .add(planes, 'type', { Row: TypeShape.row, Circle: TypeShape.circle })
+        .add(planes, 'type', { Row: ShapeType.row, Circle: ShapeType.circle })
         .name('Plane type')
-        .onChange((type: TypeShape) => {
+        .onChange((type: ShapeType) => {
             host.applyShapePreset(type);
-            const show = type === TypeShape.circle;
+            const show = type === ShapeType.circle;
             radiusX.show(show);
             radiusY.show(show);
             faceInward.show(show);
@@ -65,6 +65,7 @@ export function mountOglOrbitVegaInspector(host: OglOrbitVega): () => void {
     animation.add(scroll, 'idleSpeed', 0, 0.2, 0.001).name('Idle speed');
     animation.add(scroll, 'influence', 0, 0.1, 0.0001).name('Scroll influence');
     animation.add(scroll, 'damping', 0.1, 20, 0.1).name('Damping');
+    animation.add(scroll, 'travel', 0.5, 10, 0.1).name('Scroll travel').onChange(refresh).listen();
     animation.add(scroll, 'progress').name('Progress (debug)').listen();
 
     bendFolder.add(bend, 'enabled').name('Enabled').onChange(refresh).listen();
@@ -77,7 +78,7 @@ export function mountOglOrbitVegaInspector(host: OglOrbitVega): () => void {
     bendFolder.add(bend, 'byDistance').name('Bend by distance').onChange(refresh).listen();
 
     cameraFolder
-        .add(view, 'zOffset', -5, 5, 0.01)
+        .add(cameraOffset, 'zOffset', -5, 5, 0.01)
         .name('Z offset')
         .onChange(() => host.placeCamera())
         .listen();
