@@ -1,6 +1,6 @@
 import GUI from 'lil-gui';
 
-import { MIN_PLANE_COUNT, ShapeType } from './OglOrbitVega.config.ts';
+import { MIN_PLANE_COUNT, ShapeType, type BreakpointPresetKey } from './OglOrbitVega.config.ts';
 import type { OglOrbitVega } from './OglOrbitVega.ts';
 
 /** lil-gui parameter panel — DEV only. */
@@ -39,6 +39,17 @@ export function mountOglOrbitVegaInspector(host: OglOrbitVega): () => void {
         radiusY.hide();
         faceInward.hide();
     }
+
+    layout
+        .add(host, 'breakpoint', {
+            Desktop: 'desktop',
+            'max-xs': 'xs',
+            'max-sm': 'sm',
+            'max-md': 'md'
+        })
+        .name('Breakpoint')
+        .onChange((key: BreakpointPresetKey) => host.applyBreakpointPreset(key))
+        .listen();
 
     layout
         .add(planes, 'count', MIN_PLANE_COUNT, planes.count, 1)

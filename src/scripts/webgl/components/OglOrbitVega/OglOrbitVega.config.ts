@@ -49,3 +49,43 @@ export const DEFAULT_SHAPE = ShapeType.circle;
 export const DEFAULT_PRESET = SHAPE_PRESETS[DEFAULT_SHAPE];
 
 export const MIN_PLANE_COUNT = 6;
+
+/** Responsive layout presets (`desktop` = default; xs/sm/md from debugger screenshots). */
+export type BreakpointPresetKey = 'xs' | 'sm' | 'md' | 'desktop';
+
+export const DEFAULT_BREAKPOINT: BreakpointPresetKey = 'desktop';
+
+export const BREAKPOINT_PRESETS: Record<BreakpointPresetKey, ShapePreset> = {
+    xs: {
+        gap: 0.52,
+        size: 0.35,
+        bend: { enabled: true, radius: 0.34, distanceFactor: 1, byDistance: true },
+        cameraOffset: { zOffset: 0.01 },
+        fisheye: { enabled: true, effect: -0.5, scale: 1.54 },
+        circle: { radiusX: 1.35, radiusY: 2.31, faceInward: true }
+    },
+    sm: {
+        gap: 0.56,
+        size: 0.38,
+        bend: { enabled: true, radius: 0.34, distanceFactor: 1, byDistance: true },
+        cameraOffset: { zOffset: 0.01 },
+        fisheye: { enabled: true, effect: -0.5, scale: 1.54 },
+        circle: { radiusX: 1.35, radiusY: 2.31, faceInward: true }
+    },
+    md: {
+        gap: 0.51,
+        size: 0.38,
+        bend: { enabled: true, radius: 0.34, distanceFactor: 1, byDistance: true },
+        cameraOffset: { zOffset: 0.01 },
+        fisheye: { enabled: true, effect: -0.5, scale: 1.54 },
+        circle: { radiusX: 1.35, radiusY: 2.04, faceInward: true }
+    },
+    desktop: {
+        gap: DEFAULT_PRESET.gap,
+        size: DEFAULT_PRESET.size,
+        bend: { ...DEFAULT_PRESET.bend },
+        cameraOffset: { ...DEFAULT_PRESET.cameraOffset },
+        fisheye: { ...DEFAULT_PRESET.fisheye },
+        circle: { ...DEFAULT_PRESET.circle }
+    }
+};

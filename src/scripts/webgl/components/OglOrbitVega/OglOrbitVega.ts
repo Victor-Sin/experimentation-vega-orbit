@@ -22,11 +22,14 @@ import { OglComponent } from '../../ogl/OglComponent.ts';
 import colorspaceParsFragment from '../../chunks/colorspace_pars_fragment.glsl?raw';
 
 import {
+    BREAKPOINT_PRESETS,
+    DEFAULT_BREAKPOINT,
     DEFAULT_PRESET,
     DEFAULT_SHAPE,
     MIN_PLANE_COUNT,
     SHAPE_PRESETS,
-    ShapeType
+    ShapeType,
+    type BreakpointPresetKey
 } from './OglOrbitVega.config.ts';
 import { circleOffset, wrapRowX } from './orbitLayout.ts';
 
@@ -97,6 +100,9 @@ export class OglOrbitVega extends OglComponent {
         type: DEFAULT_SHAPE,
         circle: { ...DEFAULT_PRESET.circle }
     };
+
+    /** Active layout preset (`desktop` by default). */
+    public breakpoint: BreakpointPresetKey = DEFAULT_BREAKPOINT;
 
     public bend = { ...DEFAULT_PRESET.bend };
     public cameraOffset = { zOffset: DEFAULT_PRESET.cameraOffset.zOffset };
@@ -492,6 +498,23 @@ export class OglOrbitVega extends OglComponent {
         Object.assign(this.bend, preset.bend);
         this.cameraOffset.zOffset = preset.cameraOffset.zOffset;
         Object.assign(this.fisheye, preset.fisheye);
+
+        this.syncLayout();
+        this.placeCamera();
+    }
+
+    /** Apply a layout preset (`desktop` / `xs` / `sm` / `md`). */
+    public applyBreakpointPreset(key: BreakpointPresetKey): void {
+        const preset = BREAKPOINT_PRESETS[key];
+        this.breakpoint = key;
+        this.planes.gap = preset.gap;
+        this.planes.size = preset.size;
+        Object.assign(this.planes.circle, preset.circle);
+        Object.assign(this.bend, preset.bend);
+        this.cameraOffset.zOffset = preset.cameraOffset.zOffset;
+        Object.assign(this.fisheye, preset.fisheye);
+
+        if (!this.isInitialized) return;
 
         this.syncLayout();
         this.placeCamera();
