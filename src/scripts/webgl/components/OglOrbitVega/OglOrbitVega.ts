@@ -12,8 +12,6 @@ import {
     type Pass
 } from 'ogl';
 
-import { Monitor } from 'gl-perf';
-
 import { $device } from '#stores/device.ts';
 import { createLogger, type Logger } from '#utils/log/logger.ts';
 
@@ -49,7 +47,7 @@ const fisheyeSource = fisheyeFragment.replace(
  * Ref: https://next.frame.io/share/eab99cde-6841-47a6-8f46-cf84543e4724/568cc94a-20a9-4ed4-b93d-3a780a164f9c
  *
  * Images: `data-src-images` = JSON string[] (Shopify); `[]` → placeholder.
- * Scroll: native (`scrollY` + `wheel`) — no Locomotive Scroll in this project.
+ * Scroll: native `scrollY` — no Locomotive Scroll in this project.
  *
  * @example
  * ```html
@@ -62,7 +60,7 @@ const fisheyeSource = fisheyeFragment.replace(
 export class OglOrbitVega extends OglComponent {
     static id = 'OglOrbitVega';
 
-    /** Toggle lil-gui inspector + gl-perf overlay. */
+    /** Toggle lil-gui inspector. */
     static readonly DEBUG = true;
 
     static readonly logger: Logger = createLogger({ id: OglOrbitVega.id, color: '#222' });
@@ -124,14 +122,13 @@ export class OglOrbitVega extends OglComponent {
     private lastScrollY = 0;
     private lastScopedMs = 0;
 
-    /** Scroll/wheel acceleration only when fully in view; idle always runs. */
+    /** Scroll acceleration only when fully in view; idle always runs. */
     private isFullyVisible = false;
     private fullVisibilityObserver?: IntersectionObserver;
 
     private readonly uFxaaResolution = { value: new Vec2(1, 1) };
 
     private _unmountDevtools?: () => void;
-    private glPerf: Monitor | null = null;
 
     constructor() {
         super({ renderer: { antialias: true, alpha: true } });
@@ -175,15 +172,6 @@ export class OglOrbitVega extends OglComponent {
         super.onBindEvents();
     }
 
-    public override onWheel(event: WheelEvent): void {
-        // Native wheel complements scrollY (useful at scroll bounds / overscroll). No Locomotive Scroll here.
-        if (!this.isFullyVisible) return;
-        if ($device.get().isReducedMotion) return;
-
-        this.direction = event.deltaY > 0 ? 1 : -1;
-        this.scrollDelta += event.deltaY;
-    }
-
     public override onUpdate(clock: CanvasManagerClock): void {
         super.onUpdate(clock);
 
@@ -202,7 +190,7 @@ export class OglOrbitVega extends OglComponent {
 
         if (!reduced) {
             if (this.isFullyVisible) {
-                // Accept new scroll input only while fully visible (scrollY overwrites wheel when both fire).
+                // Accept new scroll input only while fully visible.
                 if (delta > 0) {
                     this.direction = 1;
                     this.scrollDelta = delta;
@@ -283,11 +271,9 @@ export class OglOrbitVega extends OglComponent {
         if (!this.isInitialized) return;
 
         this.post.render({ scene: this.scene, camera: this.camera });
-        this.glPerf?.update();
     }
 
     private setupScene(): void {
-        this.mountGlPerf();
         this.ctx.clearColor(0, 0, 0, 0);
 
         this.scene = new Transform();
@@ -359,7 +345,6 @@ export class OglOrbitVega extends OglComponent {
     }
 
     private disposeScene(): void {
-        this.disposeGlPerf();
         this.disposePost();
 
         this.geometry?.remove();
@@ -482,13 +467,13 @@ export class OglOrbitVega extends OglComponent {
             mesh.position.copy(this.offset);
             mesh.scale.set(size);
 
-            if (onCircle && circle.faceInward && this.offset.squaredLen() > 1e-8) {
+            if (onCircle && circle.faceInward) {
                 mesh.lookAt([0, 0, 0]);
             } else {
                 mesh.rotation.set(0, 0, 0);
             }
 
-            this.distances[i].value = Math.min(1, Math.abs(x) / Math.max(halfWidth, 1e-5));
+            this.distances[i].value = Math.min(1, Math.abs(x) / halfWidth);
         }
     }
 
@@ -597,29 +582,5 @@ export class OglOrbitVega extends OglComponent {
         const { mountOglOrbitVegaInspector } = await import('./OglOrbitVega.devtools.ts');
         this._unmountDevtools?.();
         this._unmountDevtools = mountOglOrbitVegaInspector(this);
-    }
-
-    private mountGlPerf(): void {
-        if (!OglOrbitVega.DEBUG || this.glPerf) return;
-
-        // GLPerf asks for a `webgl` context — hand it the WebGL2 context we already have.
-        const gl = this.ctx;
-        this.glPerf = new Monitor({ getContext: () => gl } as unknown as HTMLCanvasElement);
-
-        if (document.getElementById('gl-perf-compact')) return;
-
-        const style = document.createElement('style');
-        style.id = 'gl-perf-compact';
-        style.textContent = `
-            .gl-perf { padding: 8px 12px 4px; font: 11px/1.2 arial, sans-serif; z-index: 10; }
-            .gl-perf dt .unit { font-size: 9px; }
-            .gl-perf dd { font-size: 16px; padding: 2px 0 8px; }
-        `;
-        document.body.appendChild(style);
-    }
-
-    private disposeGlPerf(): void {
-        this.glPerf?.destroy();
-        this.glPerf = null;
     }
 }
