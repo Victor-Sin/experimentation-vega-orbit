@@ -5,6 +5,7 @@ uniform vec2 uResolution;
 
 varying vec2 vUv;
 
+// Ref : https://github.com/oframe/ogl/blob/master/examples/post-fxaa.html
 vec4 fxaa(sampler2D tex, vec2 uv, vec2 resolution) {
     vec2 pixel = vec2(1.0) / resolution;
 

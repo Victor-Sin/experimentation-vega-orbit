@@ -29,6 +29,9 @@ vec3 NeutralToneMapping(vec3 color) {
     return mix(color, vec3(newPeak), g);
 }
 
+
+// Ref : https://www.shadertoy.com/view/wtt3z2
+// Tweak to disable/minimize fisheye on the y axis
 void main() {
     float x = vUv.x * 2.0 - 1.0;
     float d = abs(x);
