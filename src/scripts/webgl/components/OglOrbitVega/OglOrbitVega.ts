@@ -76,7 +76,7 @@ export class OglOrbitVega extends OglComponent {
     /** Min planes for visual coverage / no gaps; URLs repeat (`i % length`) if fewer images. */
     static readonly MIN_PLANE_COUNT = MIN_PLANE_COUNT;
     /** Default for `scroll.travel` — how many strip widths progress spans while scrolling. */
-    static readonly SCROLL_TRAVEL = 3;
+    static readonly SCROLL_TRAVEL = 1.5;
 
     private scene!: Transform;
     private camera!: Camera;
@@ -177,7 +177,7 @@ export class OglOrbitVega extends OglComponent {
 
     public override onWheel(event: WheelEvent): void {
         // Native wheel complements scrollY (useful at scroll bounds / overscroll). No Locomotive Scroll here.
-        if (!this.isFullyVisible || event.deltaY === 0) return;
+        if (!this.isFullyVisible) return;
         if ($device.get().isReducedMotion) return;
 
         this.direction = event.deltaY > 0 ? 1 : -1;
@@ -202,12 +202,16 @@ export class OglOrbitVega extends OglComponent {
 
         if (!reduced) {
             if (this.isFullyVisible) {
-                if (delta > 0) this.direction = 1;
-                else if (delta < 0) this.direction = -1;
-
                 // Accept new scroll input only while fully visible (scrollY overwrites wheel when both fire).
-                if (delta !== 0) this.scrollDelta = delta;
-                else this.scrollDelta *= damp;
+                if (delta > 0) {
+                    this.direction = 1;
+                    this.scrollDelta = delta;
+                } else if (delta < 0) {
+                    this.direction = -1;
+                    this.scrollDelta = delta;
+                } else {
+                    this.scrollDelta *= damp;
+                }
             } else {
                 // Keep damping leftover velocity after leaving the viewport.
                 this.scrollDelta *= damp;
