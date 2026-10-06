@@ -122,10 +122,6 @@ export class OglOrbitVega extends OglComponent {
     private lastScrollY = 0;
     private lastScopedMs = 0;
 
-    /** Scroll acceleration only when fully in view; idle always runs. */
-    private isFullyVisible = false;
-    private fullVisibilityObserver?: IntersectionObserver;
-
     private readonly uFxaaResolution = { value: new Vec2(1, 1) };
 
     private _unmountDevtools?: () => void;
@@ -146,23 +142,11 @@ export class OglOrbitVega extends OglComponent {
         };
     }
 
-    public override onMounted(parent: HTMLElement): void {
-        this.fullVisibilityObserver = new IntersectionObserver(
-            ([entry]) => {
-                this.isFullyVisible = entry?.intersectionRatio >= 1;
-            },
-            { threshold: 1 }
-        );
-        this.fullVisibilityObserver.observe(parent);
-
+    public override onMounted(_parent: HTMLElement): void {
         if (OglOrbitVega.DEBUG) void this.mountDevtools();
     }
 
     public override onUnmounted(): void {
-        this.fullVisibilityObserver?.disconnect();
-        this.fullVisibilityObserver = undefined;
-        this.isFullyVisible = false;
-
         this._unmountDevtools?.();
         this._unmountDevtools = undefined;
     }
@@ -181,7 +165,6 @@ export class OglOrbitVega extends OglComponent {
         // reduced-motion: stop user acceleration only; idle keeps running.
         const reduced = $device.get().isReducedMotion;
 
-        // Always sample scrollY so re-entering fully-visible doesn't spike from a large gap.
         const delta = window.scrollY - this.lastScrollY;
         this.lastScrollY = window.scrollY;
         const scopedDt = (this.scopedElapsedTime - this.lastScopedMs) * 0.001;
@@ -189,19 +172,13 @@ export class OglOrbitVega extends OglComponent {
         const damp = Math.exp(-this.scroll.damping * dt);
 
         if (!reduced) {
-            if (this.isFullyVisible) {
-                // Accept new scroll input only while fully visible.
-                if (delta > 0) {
-                    this.direction = 1;
-                    this.scrollDelta = delta;
-                } else if (delta < 0) {
-                    this.direction = -1;
-                    this.scrollDelta = delta;
-                } else {
-                    this.scrollDelta *= damp;
-                }
+            if (delta > 0) {
+                this.direction = 1;
+                this.scrollDelta = delta;
+            } else if (delta < 0) {
+                this.direction = -1;
+                this.scrollDelta = delta;
             } else {
-                // Keep damping leftover velocity after leaving the viewport.
                 this.scrollDelta *= damp;
             }
 
