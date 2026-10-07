@@ -1,3 +1,7 @@
+import type { BreakpointPresetKey } from '../OglVegaCarousel/OglVegaCarousel.ts';
+
+export type { BreakpointPresetKey };
+
 export enum ShapeType {
     row = 'row',
     circle = 'circle'
@@ -51,7 +55,6 @@ export const DEFAULT_PRESET = SHAPE_PRESETS[DEFAULT_SHAPE];
 export const MIN_PLANE_COUNT = 6;
 
 /** Responsive layout presets (`desktop` = default; xs/sm/md from debugger screenshots). */
-export type BreakpointPresetKey = 'xs' | 'sm' | 'md' | 'desktop';
 
 export const DEFAULT_BREAKPOINT: BreakpointPresetKey = 'desktop';
 

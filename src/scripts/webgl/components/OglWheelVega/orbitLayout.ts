@@ -30,18 +30,6 @@ export function perspectiveHeight(
     return diameter / (2 * part * tanHalf * safeAspect);
 }
 
-/** Ortho half-extents so `diameter` fills `visiblePart` of the canvas width. */
-export function orthoHalfExtents(
-    diameter: number,
-    visiblePart: number,
-    aspect: number
-): { halfW: number; halfH: number } {
-    const part = Math.max(visiblePart, 1e-4);
-    const halfW = diameter / part / 2;
-    const halfH = halfW / Math.max(aspect, 1e-4);
-    return { halfW, halfH };
-}
-
 /**
  * Head of the ring, not mesh 0.
  * `circlePlane` places this index on +X (angle 0) when the scroll offset is 0.
