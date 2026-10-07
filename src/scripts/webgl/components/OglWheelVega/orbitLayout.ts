@@ -1,0 +1,83 @@
+/**
+ * Closed ring in the XZ plane.
+ * `size` is the plane width along the arc, `gap` the empty space between edges.
+ * Centers sit on radius R so the pitch `size + gap` tiles the circumference.
+ */
+export function circleRadius(count: number, size: number, gap: number): number {
+    const pitch = size + gap;
+    return (Math.max(count, 1) * pitch) / (2 * Math.PI);
+}
+
+/** Outer width of the ring, including the plane extent past the center radius. */
+export function circleOuterDiameter(radius: number, size: number): number {
+    return 2 * radius + size;
+}
+
+/**
+ * Perspective camera height so a world width `diameter` fills `visiblePart` of the canvas width.
+ * OGL fov is vertical: visibleWidth = 2 * h * tan(fov/2) * aspect.
+ */
+export function perspectiveHeight(
+    diameter: number,
+    visiblePart: number,
+    fovDegrees: number,
+    aspect: number
+): number {
+    const fovY = (fovDegrees * Math.PI) / 180;
+    const part = Math.max(visiblePart, 1e-4);
+    const tanHalf = Math.tan(fovY / 2);
+    const safeAspect = Math.max(aspect, 1e-4);
+    return diameter / (2 * part * tanHalf * safeAspect);
+}
+
+/** Ortho half-extents so `diameter` fills `visiblePart` of the canvas width. */
+export function orthoHalfExtents(
+    diameter: number,
+    visiblePart: number,
+    aspect: number
+): { halfW: number; halfH: number } {
+    const part = Math.max(visiblePart, 1e-4);
+    const halfW = diameter / part / 2;
+    const halfH = halfW / Math.max(aspect, 1e-4);
+    return { halfW, halfH };
+}
+
+/**
+ * Head of the ring, not mesh 0.
+ * `circlePlane` places this index on +X (angle 0) when the scroll offset is 0.
+ */
+export function leadingPlaneIndex(count: number): number {
+    const safeCount = Math.max(count, 1);
+    const raw = -Math.PI / 2 / ((Math.PI * 2) / safeCount);
+    return ((Math.round(raw) % safeCount) + safeCount) % safeCount;
+}
+
+/**
+ * Place one plane on the ring.
+ * The mesh starts as an XY quad (normal +Z). rotationX lays it on XZ facing +Y.
+ * rotationY yaws so the image bottom (local −Y) points at the origin (YXZ Euler: Ry * Rx).
+ */
+export function circlePlane(
+    index: number,
+    count: number,
+    radius: number,
+    angleOffset: number
+): {
+    x: number;
+    y: number;
+    z: number;
+    rotationX: number;
+    rotationY: number;
+} {
+    const safeCount = Math.max(count, 1);
+    const lead = leadingPlaneIndex(safeCount);
+    const angle = angleOffset + ((index - lead) * Math.PI * 2) / safeCount;
+
+    return {
+        x: Math.cos(angle) * radius,
+        y: 0,
+        z: Math.sin(angle) * radius,
+        rotationX: -Math.PI / 2,
+        rotationY: -Math.PI / 2 - angle
+    };
+}
