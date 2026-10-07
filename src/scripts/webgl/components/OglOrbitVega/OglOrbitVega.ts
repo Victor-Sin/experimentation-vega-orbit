@@ -89,7 +89,8 @@ export class OglOrbitVega extends OglComponent {
 
     private fallbackTexture: Texture | null = null;
     private imageUrls: string[] = [];
-    private textureReady = false;
+    private readonly textureReady = new Map<string, boolean>();
+    private readonly textureFades = new Map<string, { value: number }>();
 
     public planes = {
         count: MIN_PLANE_COUNT,
@@ -134,7 +135,6 @@ export class OglOrbitVega extends OglComponent {
             uBendByDistance: { value: this.bend.byDistance ? 1 : 0, type: '1f' },
             uDistanceFactor: { value: this.bend.distanceFactor, type: '1f' },
             uBendEnabled: { value: this.bend.enabled ? 1 : 0, type: '1f' },
-            uTextureFade: { value: 0, type: '1f' },
             uFisheyeEnabled: { value: this.fisheye.enabled ? 1 : 0, type: '1f' },
             uFisheyeEffect: { value: this.fisheye.effect, type: '1f' },
             uFisheyeScale: { value: this.fisheye.scale, type: '1f' },
@@ -198,10 +198,9 @@ export class OglOrbitVega extends OglComponent {
         this.scroll.progress = 0.5 + this.idleProgress + this.scrollProgress;
         this.syncLayout();
 
-        if (this.textureReady && this.uniforms.uTextureFade.value < 1) {
-            this.uniforms.uTextureFade.value = reduced
-                ? 1
-                : Math.min(1, this.uniforms.uTextureFade.value + dt / OglOrbitVega.FADE_DURATION);
+        for (const [url, fade] of Array.from(this.textureFades.entries())) {
+            if (!this.textureReady.get(url) || fade.value >= 1) continue;
+            fade.value = reduced ? 1 : Math.min(1, fade.value + dt / OglOrbitVega.FADE_DURATION);
         }
     }
 
@@ -278,8 +277,7 @@ export class OglOrbitVega extends OglComponent {
         this.meshes.length = 0;
         this.distances.length = 0;
         this.disposeTextures();
-        this.textureReady = false;
-        this.uniforms.uTextureFade.value = 0;
+        this.textureFades.clear();
         this.idleProgress = 0;
         this.scrollProgress = 0;
         this.lastScopedMs = 0;
@@ -294,22 +292,7 @@ export class OglOrbitVega extends OglComponent {
 
             const mesh = new Mesh(this.ctx, {
                 geometry: this.geometry,
-                program: new Program(this.ctx, {
-                    vertex: planeVertex,
-                    fragment: planeFragment,
-                    transparent: true,
-                    uniforms: {
-                        uBendRadius: this.uniforms.uBendRadius,
-                        uBendByDistance: this.uniforms.uBendByDistance,
-                        uDistanceFactor: this.uniforms.uDistanceFactor,
-                        uBendEnabled: this.uniforms.uBendEnabled,
-                        uDistance,
-                        uTextureFade: this.uniforms.uTextureFade,
-                        uMap: {
-                            value: url ? this.ensureTexture(url) : this.createFallbackTexture()
-                        }
-                    }
-                })
+                program: this.createProgram(url, uDistance)
             });
             mesh.setParent(this.scene);
             this.meshes.push(mesh);
@@ -336,8 +319,7 @@ export class OglOrbitVega extends OglComponent {
         this.meshes.length = 0;
         this.distances.length = 0;
         this.imageUrls = [];
-        this.textureReady = false;
-        this.uniforms.uTextureFade.value = 0;
+        this.textureFades.clear();
         this.isInitialized = false;
     }
 
@@ -362,10 +344,37 @@ export class OglOrbitVega extends OglComponent {
             .filter(Boolean);
     }
 
+    private createProgram(url: string | undefined, uDistance: { value: number }): Program {
+        return new Program(this.ctx, {
+            vertex: planeVertex,
+            fragment: planeFragment,
+            transparent: true,
+            uniforms: {
+                uBendRadius: this.uniforms.uBendRadius,
+                uBendByDistance: this.uniforms.uBendByDistance,
+                uDistanceFactor: this.uniforms.uDistanceFactor,
+                uBendEnabled: this.uniforms.uBendEnabled,
+                uDistance,
+                uTextureFade: url ? this.ensureFade(url) : { value: 0 },
+                uMap: { value: url ? this.ensureTexture(url) : this.createFallbackTexture() }
+            }
+        });
+    }
+
     private disposeTextures(): void {
         for (const map of Array.from(this.textureCache.values()))
             this.ctx.deleteTexture(map.texture);
         this.textureCache.clear();
+        this.textureReady.clear();
+    }
+
+    private ensureFade(url: string): { value: number } {
+        const cached = this.textureFades.get(url);
+        if (cached) return cached;
+
+        const fade = { value: 0 };
+        this.textureFades.set(url, fade);
+        return fade;
     }
 
     private ensureTexture(url: string): Texture {
@@ -384,15 +393,17 @@ export class OglOrbitVega extends OglComponent {
             internalFormat: gl.SRGB8_ALPHA8
         });
 
+        this.textureCache.set(url, map);
+        this.textureReady.set(url, false);
+
         const image = new Image();
         image.onload = () => {
             map.image = image;
-            this.textureReady = true;
+            this.textureReady.set(url, true);
         };
         image.onerror = () => OglOrbitVega.warn(`Failed to load texture: ${url}`);
         image.src = url;
 
-        this.textureCache.set(url, map);
         return map;
     }
 
