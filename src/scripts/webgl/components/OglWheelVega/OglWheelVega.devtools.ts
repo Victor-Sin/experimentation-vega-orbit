@@ -53,11 +53,29 @@ export function mountOglWheelVegaInspector(host: OglWheelVega): () => void {
     animation.add(scroll, 'travel', 0.5, 10, 0.1).name('Scroll travel').onChange(refresh).listen();
     animation.add(scroll, 'progress').name('Progress (debug)').listen();
 
+    const introFolder = gui.addFolder('Intro');
+    introFolder.add(host.intro, 'drop', 0.1, 3, 0.01).name('Drop duration');
+    introFolder.add(host.intro, 'stagger', 0, 0.3, 0.01).name('Stagger');
+    introFolder.add(host.intro, 'delay', 0, 2, 0.01).name('Delay');
+    introFolder.add(host.intro, 'lift', 0, 30, 0.1).name('Lift');
+    introFolder.add(host, 'replayIntro').name('Replay');
+
     cameraFolder
-        .add(planes.circle, 'circleVisiblePart', 0.1, 1, 0.01)
+        .add(planes.circle, 'circleVisiblePart', 0.1, 1.5, 0.01)
         .name('Visible part')
-        .onChange(() => host.placeCamera())
         .listen();
+    cameraFolder
+        .add(planes.circle, 'maxCircleVisiblePart', 0.1, 1.5, 0.01)
+        .name('Max visible part')
+        .onChange(() => host.refreshVisiblePartScroll());
+    cameraFolder
+        .add(planes.circle, 'visiblePartScroll', 0.1, 2, 0.01)
+        .name('Visible part scroll')
+        .onChange(() => host.refreshVisiblePartScroll());
+    cameraFolder
+        .add(planes.circle, 'translateZ', -8, 8, 0.01)
+        .name('Translate Z')
+        .onChange(() => host.refreshVisiblePartScroll());
     cameraFolder
         .add(planes.circle, 'orthographic')
         .name('Orthographic')

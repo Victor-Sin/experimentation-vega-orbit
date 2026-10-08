@@ -11,6 +11,8 @@ import {
     type Pass
 } from 'ogl';
 
+import gsap from 'gsap';
+
 import { $device } from '#stores/device.ts';
 
 import type { CanvasManagerClock } from '../../core/CanvasManager.ts';
@@ -46,9 +48,11 @@ export abstract class OglVegaCarousel extends OglComponent {
 
     protected static readonly FADE_DURATION = 0.6;
     /** Default for `scroll.travel`. */
-    protected static readonly SCROLL_TRAVEL = 1.5;
+    protected static readonly SCROLL_TRAVEL = 2;
 
     protected scene!: Transform;
+    /** Parent of every plane. Intro tweens land here. */
+    protected meshesGroup!: Transform;
     protected camera!: Camera;
     protected geometry!: Plane;
     protected post!: Post;
@@ -75,14 +79,18 @@ export abstract class OglVegaCarousel extends OglComponent {
     public fisheye = { fxaa: true };
 
     public scroll = {
-        idleSpeed: 0.007,
+        idleSpeed: 0.002,
         influence: 0.01,
         damping: 6,
-        progress: 0.5,
+        progress: 0,
         travel: OglVegaCarousel.SCROLL_TRAVEL
     };
 
-    private direction = 1 as 1 | -1;
+    /** False until `playIntro` finishes. Blocks scroll velocity, direction, and the nearest notification. */
+    protected isReady = false;
+    private introTimeline?: gsap.core.Timeline;
+
+    protected direction = 1 as 1 | -1;
     private scrollDelta = 0;
     private scrollRate = 0;
     private idleProgress = 0;
@@ -136,31 +144,34 @@ export abstract class OglVegaCarousel extends OglComponent {
         this.lastScopedMs = this.scopedElapsedTime;
         const damp = Math.exp(-this.scroll.damping * dt);
 
-        if (!reduced) {
-            if (delta > 0) {
-                this.direction = 1;
-                this.scrollDelta = delta;
-            } else if (delta < 0) {
-                this.direction = -1;
-                this.scrollDelta = delta;
-            } else {
-                this.scrollDelta *= damp;
-            }
+        if (this.isReady) {
+            if (!reduced) {
+                if (delta > 0) {
+                    this.direction = 1;
+                    this.scrollDelta = delta;
+                } else if (delta < 0) {
+                    this.direction = -1;
+                    this.scrollDelta = delta;
+                } else {
+                    this.scrollDelta *= damp;
+                }
 
-            const lerp = 1 - damp;
-            this.scrollRate += (this.scrollDelta * this.scroll.influence - this.scrollRate) * lerp;
-            this.scrollProgress += this.scrollRate * dt;
-        } else {
-            // Decay any leftover user acceleration without accepting new input.
-            this.scrollDelta *= damp;
-            this.scrollRate *= damp;
+                const lerp = 1 - damp;
+                this.scrollRate +=
+                    (this.scrollDelta * this.scroll.influence - this.scrollRate) * lerp;
+                this.scrollProgress += this.scrollRate * dt;
+            } else {
+                // Decay any leftover user acceleration without accepting new input.
+                this.scrollDelta *= damp;
+                this.scrollRate *= damp;
+            }
         }
 
         if (scopedDt > 0) {
             this.idleProgress += this.scroll.idleSpeed * this.direction * scopedDt;
         }
 
-        this.scroll.progress = 0.5 + this.idleProgress + this.scrollProgress;
+        this.scroll.progress = this.idleProgress + this.scrollProgress;
         this.syncFromScroll();
 
         for (const [url, fade] of Array.from(this.textureFades.entries())) {
@@ -227,6 +238,8 @@ export abstract class OglVegaCarousel extends OglComponent {
         this.ctx.clearColor(0, 0, 0, 0);
 
         this.scene = new Transform();
+        this.meshesGroup = new Transform();
+        this.meshesGroup.setParent(this.scene);
         this.imageUrls = this.parseSrcImages();
 
         if (this.imageUrls.length === 0) {
@@ -257,7 +270,7 @@ export abstract class OglVegaCarousel extends OglComponent {
                 geometry: this.geometry,
                 program: this.createMeshProgram(i, url)
             });
-            mesh.setParent(this.scene);
+            mesh.setParent(this.meshesGroup);
             this.meshes.push(mesh);
             this.onMeshCreated(i, mesh);
         }
@@ -265,9 +278,28 @@ export abstract class OglVegaCarousel extends OglComponent {
         this.syncLayout();
         this.setupPost();
         this.isInitialized = true;
+        this.playIntro();
+    }
+
+    /**
+     * Starts the intro and returns its timeline.
+     * `isReady` flips true on complete. The wheel adds the tweens.
+     */
+    protected playIntro(): gsap.core.Timeline {
+        this.isReady = false;
+        this.introTimeline?.kill();
+        this.introTimeline = gsap.timeline({
+            onComplete: () => {
+                this.isReady = true;
+            }
+        });
+        return this.introTimeline;
     }
 
     protected disposeScene(): void {
+        this.introTimeline?.kill();
+        this.introTimeline = undefined;
+        this.isReady = false;
         this.disposePost();
 
         this.geometry?.remove();
@@ -390,7 +422,19 @@ export abstract class OglVegaCarousel extends OglComponent {
         this.lastScopedMs = 0;
         this.scrollRate = 0;
         this.scrollDelta = 0;
-        this.scroll.progress = 0.5;
+        this.scroll.progress = 0;
+    }
+
+    /** Rest pose for a replay. Keeps the clock sample so the next frame does not swallow elapsed idle. */
+    protected resetScrollPose(): void {
+        this.idleProgress = 0;
+        this.scrollProgress = 0;
+        this.scrollRate = 0;
+        this.scrollDelta = 0;
+        this.direction = 1;
+        this.scroll.progress = 0;
+        this.lastScrollY = window.scrollY;
+        this.lastScopedMs = this.scopedElapsedTime;
     }
 
     private disposeTextures(): void {

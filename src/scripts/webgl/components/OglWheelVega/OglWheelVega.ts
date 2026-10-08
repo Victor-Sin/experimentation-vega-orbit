@@ -1,11 +1,13 @@
-import { Program, Vec3 } from 'ogl';
+import { Program } from 'ogl';
 
 import gsap from 'gsap';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
 import {
     OglVegaCarousel,
     type BreakpointPresetKey,
-    type PlaneGeometrySpec
+    type PlaneGeometrySpec,
+    type SharedLayoutPreset
 } from '../OglVegaCarousel/OglVegaCarousel.ts';
 
 import { BREAKPOINT_PRESETS, DEFAULT_PRESET, MIN_PLANE_COUNT } from './OglWheelVega.config.ts';
@@ -13,12 +15,14 @@ import {
     circleOuterDiameter,
     circlePlane,
     circleRadius,
-    leadingPlaneIndex,
-    perspectiveHeight
+    perspectiveHeight,
+    planeAngle
 } from './orbitLayout.ts';
 
 import planeFragment from './plane.frag?raw';
 import planeVertex from './plane.vert?raw';
+
+gsap.registerPlugin(ScrollTrigger);
 
 /**
  * 3D carousel section for another site.
@@ -52,7 +56,9 @@ export class OglWheelVega extends OglVegaCarousel {
     /** Multiplier applied to `planes.size` for the mesh closest to the cardinal origin. */
     public nearestScale = 1.5;
 
-    private readonly offset = new Vec3();
+    /** Intro timing, read when the intro starts. */
+    public intro = { drop: 1, stagger: 0.05, delay: 0.15, lift: 10 };
+
     private readonly programCache = new Map<string, Program>();
     private fallbackProgram: Program | null = null;
 
@@ -60,8 +66,10 @@ export class OglWheelVega extends OglVegaCarousel {
     private ringRadius = 0;
     private ringCircumference = 0;
     private ringOriginAngle = 0;
-    private ringLead = 0;
     private ringSize = 0;
+
+    /** Added to the scroll angle. Stays put after the intro so the idle does not jump. */
+    private readonly introSpin = { angle: 0 };
 
     private currentIndex = -1;
     private previousIndex = -1;
@@ -69,6 +77,11 @@ export class OglWheelVega extends OglVegaCarousel {
     private hasScrollAngle = false;
     /** `undefined` until the first report, `null` when there is no image. */
     private lastImageIndex: number | null | undefined = undefined;
+
+    /** Authored `circleVisiblePart`, kept apart from the value scroll writes. */
+    private visiblePartStart = DEFAULT_PRESET.circle.circleVisiblePart;
+    private visiblePartTrigger?: ScrollTrigger;
+    private readonly visiblePartEase = gsap.parseEase('power2.out');
 
     protected override presetFor(key: BreakpointPresetKey) {
         return BREAKPOINT_PRESETS[key];
@@ -114,11 +127,111 @@ export class OglWheelVega extends OglVegaCarousel {
         this.resetNearest();
     }
 
+    protected override disposeScene(): void {
+        this.killVisiblePartTrigger();
+        super.disposeScene();
+    }
+
     protected override syncFromScroll(): void {
         this.syncWheel();
     }
 
-    /** Settings that do not depend on scroll: post uniforms, ring size, which mesh is first. */
+    protected override applyBreakpointExtras(preset: SharedLayoutPreset): void {
+        const start = (preset.circle as { circleVisiblePart?: number }).circleVisiblePart;
+        if (start !== undefined) this.visiblePartStart = start;
+        this.refreshVisiblePartScroll();
+    }
+
+    /** Intro tweens. `isReady` becomes true when this timeline completes. */
+    protected override playIntro(): gsap.core.Timeline {
+        this.ensureVisiblePartTrigger();
+        const timeline = super.playIntro();
+
+        const count = this.ringCount;
+        const { drop, stagger, delay, lift } = this.intro;
+        const dropDuration = drop + Math.max(count - 1, 0) * stagger;
+        const total = dropDuration + delay;
+        const rate = this.scroll.idleSpeed * this.direction * 4 * Math.PI * this.scroll.travel;
+        const idleEnd = this.scrollAngle() + rate * total;
+        // Quarter of a half-step inside the edge mesh 0 enters from, along the idle direction.
+        const halfGapAngle = Math.PI / Math.max(count, 1);
+        const target = -this.direction * (halfGapAngle - halfGapAngle / 4);
+        this.introSpin.angle = this.wrapAngle(target - idleEnd);
+
+        // Index order is counter-clockwise from above; the intro walks the other way from mesh 0.
+        const ordered = this.meshes
+            .slice(0, count)
+            .map((_, i) => this.meshes[(count - i) % count].position);
+        timeline.fromTo(
+            ordered,
+            { y: lift },
+            { y: 0, duration: drop, ease: 'power2.out', stagger },
+            0
+        );
+        timeline.to({}, { duration: delay });
+
+        return timeline;
+    }
+
+    /** Page scroll from 0 to `visiblePartScroll` viewport heights drives the camera zoom. */
+    private ensureVisiblePartTrigger(): void {
+        this.killVisiblePartTrigger();
+        this.visiblePartTrigger = ScrollTrigger.create({
+            trigger: document.documentElement,
+            start: 0,
+            end: () => window.innerHeight * this.planes.circle.visiblePartScroll,
+            scrub: true,
+            onUpdate: (self) => this.applyVisiblePart(self.progress)
+        });
+        this.applyVisiblePart(this.visiblePartTrigger.progress);
+    }
+
+    /** Recalculate the end distance and write the visible part for the current scroll. */
+    public refreshVisiblePartScroll(): void {
+        this.visiblePartTrigger?.refresh();
+        this.applyVisiblePart(this.visiblePartTrigger?.progress ?? 0);
+    }
+
+    private applyVisiblePart(progress: number): void {
+        const eased = this.visiblePartEase(progress);
+        this.planes.circle.circleVisiblePart = gsap.utils.interpolate(
+            this.visiblePartStart,
+            this.planes.circle.maxCircleVisiblePart,
+            eased
+        );
+        if (this.meshesGroup) {
+            this.meshesGroup.position.z = gsap.utils.interpolate(
+                0,
+                this.planes.circle.translateZ,
+                eased
+            );
+        }
+        this.placeCamera();
+    }
+
+    private killVisiblePartTrigger(): void {
+        this.visiblePartTrigger?.kill();
+        this.visiblePartTrigger = undefined;
+    }
+
+    /** Rest pose, then the intro. Scale waits until this timeline completes. */
+    public replayIntro(): void {
+        this.killScaleTweens();
+        this.currentIndex = -1;
+        this.previousIndex = -1;
+        this.lastImageIndex = undefined;
+        this.resetScrollPose();
+        this.playIntro();
+    }
+
+    /** Scroll angle around Y. Progress 0.5 sits on the origin axis before the intro spin. */
+    private scrollAngle(): number {
+        const { ringRadius: radius, ringCircumference: circumference } = this;
+        const translateX = (this.scroll.progress * 2 - 1) * circumference * this.scroll.travel;
+        return translateX / radius;
+    }
+
+    /** Settings that do not depend on scroll: post uniforms and ring size. Mesh 0 stays on the origin axis. */
     public override syncLayout(): void {
         this.syncPostUniforms();
 
@@ -134,7 +247,6 @@ export class OglWheelVega extends OglVegaCarousel {
         this.ringRadius = circleRadius(count, size, gap);
         this.ringCircumference = Math.max(count, 1) * (size + gap);
         this.ringOriginAngle = originAngle;
-        this.ringLead = leadingPlaneIndex(count);
         this.ringSize = size;
 
         for (let i = 0; i < this.meshes.length; i++) {
@@ -192,31 +304,27 @@ export class OglWheelVega extends OglVegaCarousel {
 
     /** Scroll pose: plane positions, nearest image, and its scale. */
     private syncWheel(): void {
+        console.log('travel', this.scroll.travel);
         const count = this.ringCount;
         if (count === 0) return;
 
-        const {
-            ringRadius: radius,
-            ringCircumference: circumference,
-            ringOriginAngle: originAngle,
-            ringLead: lead,
-            ringSize: size
-        } = this;
-        // `scroll.travel`: progress spans several full turns while the page scrolls.
-        const translateX = (this.scroll.progress * 2 - 1) * circumference * this.scroll.travel;
-        const scrollAngle = radius > 1e-5 ? translateX / radius : 0;
-        const angleOffset = scrollAngle + originAngle;
-        const nearest =
-            this.imageUrls.length > 0
-                ? this.nearestMeshIndex(count, lead, scrollAngle, originAngle)
-                : -1;
+        const { ringRadius: radius, ringOriginAngle: originAngle, ringSize: size } = this;
+        const scrollAngle = this.scrollAngle();
+        const spun = scrollAngle + this.introSpin.angle;
+        const angleOffset = spun + originAngle;
+        const nearest = this.imageUrls.length > 0 ? this.nearestMeshIndex(count, spun) : -1;
 
         for (let i = 0; i < count; i++) {
             const mesh = this.meshes[i];
             const plane = circlePlane(i, count, radius, angleOffset);
-            this.offset.set(plane.x, plane.y, plane.z);
-            mesh.position.copy(this.offset);
+            mesh.position.x = plane.x;
+            mesh.position.z = plane.z;
             mesh.rotation.set(plane.rotationX, plane.rotationY, 0);
+        }
+
+        if (!this.isReady) {
+            this.holdBaseScale(size);
+            return;
         }
 
         if (nearest < 0) {
@@ -229,14 +337,11 @@ export class OglWheelVega extends OglVegaCarousel {
         this.syncNearestScale(nearest, size);
     }
 
-    /** Mesh whose world angle is closest to the cardinal origin. */
-    private nearestMeshIndex(
-        count: number,
-        lead: number,
-        scrollAngle: number,
-        originAngle: number
-    ): number {
-        const step = (Math.PI * 2) / count;
+    /**
+     * Mesh closest to the origin axis.
+     * `angle` is scroll plus the intro spin. The axis itself cancels out of the delta.
+     */
+    private nearestMeshIndex(count: number, scrollAngle: number): number {
         const velocity = scrollAngle - (this.hasScrollAngle ? this.prevScrollAngle : scrollAngle);
         this.prevScrollAngle = scrollAngle;
         this.hasScrollAngle = true;
@@ -246,8 +351,7 @@ export class OglWheelVega extends OglVegaCarousel {
         let nearestDelta = 0;
 
         for (let i = 0; i < count; i++) {
-            const angle = scrollAngle + originAngle + (i - lead) * step;
-            const delta = this.wrapAngle(angle - originAngle);
+            const delta = this.wrapAngle(planeAngle(i, count, scrollAngle));
             const abs = Math.abs(delta);
             const tied = Math.abs(abs - nearestAbs) <= 1e-4;
 
@@ -273,7 +377,10 @@ export class OglWheelVega extends OglVegaCarousel {
 
     private wrapAngle(angle: number): number {
         const tau = Math.PI * 2;
-        return ((((angle + Math.PI) % tau) + tau) % tau) - Math.PI;
+        angle %= tau;
+        if (angle > Math.PI) angle -= tau;
+        if (angle < -Math.PI) angle += tau;
+        return angle;
     }
 
     private reportNearestImage(index: number | null): void {
@@ -291,6 +398,15 @@ export class OglWheelVega extends OglVegaCarousel {
                 detail: { index }
             })
         );
+    }
+
+    /** Base size during the intro. The nearest scale starts once `isReady` is true. */
+    private holdBaseScale(size: number): void {
+        for (const mesh of this.meshes) {
+            if (!mesh.visible || gsap.isTweening(mesh.scale)) continue;
+            if (Math.abs(mesh.scale.x - size) <= 1e-4) continue;
+            mesh.scale.set(size, size, size);
+        }
     }
 
     /** Scale only the nearest mesh. The tween runs when its index changes. */
@@ -340,6 +456,7 @@ export class OglWheelVega extends OglVegaCarousel {
 
     private resetNearest(): void {
         this.ringCount = 0;
+        this.introSpin.angle = 0;
         this.currentIndex = -1;
         this.previousIndex = -1;
         this.prevScrollAngle = 0;

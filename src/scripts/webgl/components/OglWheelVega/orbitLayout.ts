@@ -15,6 +15,7 @@ export function circleOuterDiameter(radius: number, size: number): number {
 
 /**
  * Perspective camera height so a world width `diameter` fills `visiblePart` of the canvas width.
+ * use TOH formula from trigonometry, H = O / tan(fov/2), multiply by visiblePart to get
  * OGL fov is vertical: visibleWidth = 2 * h * tan(fov/2) * aspect.
  */
 export function perspectiveHeight(
@@ -24,20 +25,18 @@ export function perspectiveHeight(
     aspect: number
 ): number {
     const fovY = (fovDegrees * Math.PI) / 180;
-    const part = Math.max(visiblePart, 1e-4);
     const tanHalf = Math.tan(fovY / 2);
-    const safeAspect = Math.max(aspect, 1e-4);
-    return diameter / (2 * part * tanHalf * safeAspect);
+    return diameter / (2 * visiblePart * tanHalf * aspect);
 }
 
 /**
- * Head of the ring, not mesh 0.
- * `circlePlane` places this index on +X (angle 0) when the scroll offset is 0.
+ * Angle of mesh `index` on the ring.
+ * Index 0 sits on `angleOffset` (the chosen axis when scroll is 0).
+ * Increasing index walks counter-clockwise when seen from above.
  */
-export function leadingPlaneIndex(count: number): number {
+export function planeAngle(index: number, count: number, angleOffset: number): number {
     const safeCount = Math.max(count, 1);
-    const raw = -Math.PI / 2 / ((Math.PI * 2) / safeCount);
-    return ((Math.round(raw) % safeCount) + safeCount) % safeCount;
+    return angleOffset - (index * Math.PI * 2) / safeCount;
 }
 
 /**
@@ -57,9 +56,7 @@ export function circlePlane(
     rotationX: number;
     rotationY: number;
 } {
-    const safeCount = Math.max(count, 1);
-    const lead = leadingPlaneIndex(safeCount);
-    const angle = angleOffset + ((index - lead) * Math.PI * 2) / safeCount;
+    const angle = planeAngle(index, count, angleOffset);
 
     return {
         x: Math.cos(angle) * radius,
