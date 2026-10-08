@@ -15,7 +15,7 @@ export function mountOglWheelVegaInspector(host: OglWheelVega): () => void {
     const refresh = () => host.syncLayout();
     const refreshView = () => {
         refresh();
-        host.placeCamera();
+        host.refreshVisiblePartScroll();
     };
 
     layout
@@ -60,10 +60,6 @@ export function mountOglWheelVegaInspector(host: OglWheelVega): () => void {
     introFolder.add(host.intro, 'lift', 0, 30, 0.1).name('Lift');
     introFolder.add(host, 'replayIntro').name('Replay');
 
-    cameraFolder
-        .add(planes.circle, 'circleVisiblePart', 0.1, 1.5, 0.01)
-        .name('Visible part')
-        .listen();
     cameraFolder
         .add(planes.circle, 'maxCircleVisiblePart', 0.1, 1.5, 0.01)
         .name('Max visible part')

@@ -144,27 +144,24 @@ export abstract class OglVegaCarousel extends OglComponent {
         this.lastScopedMs = this.scopedElapsedTime;
         const damp = Math.exp(-this.scroll.damping * dt);
 
-        if (this.isReady) {
-            if (!reduced) {
-                if (delta > 0) {
-                    this.direction = 1;
-                    this.scrollDelta = delta;
-                } else if (delta < 0) {
-                    this.direction = -1;
-                    this.scrollDelta = delta;
-                } else {
-                    this.scrollDelta *= damp;
-                }
-
-                const lerp = 1 - damp;
-                this.scrollRate +=
-                    (this.scrollDelta * this.scroll.influence - this.scrollRate) * lerp;
-                this.scrollProgress += this.scrollRate * dt;
+        if (!reduced) {
+            if (delta > 0) {
+                this.direction = 1;
+                this.scrollDelta = delta;
+            } else if (delta < 0) {
+                this.direction = -1;
+                this.scrollDelta = delta;
             } else {
-                // Decay any leftover user acceleration without accepting new input.
                 this.scrollDelta *= damp;
-                this.scrollRate *= damp;
             }
+
+            const lerp = 1 - damp;
+            this.scrollRate += (this.scrollDelta * this.scroll.influence - this.scrollRate) * lerp;
+            this.scrollProgress += this.scrollRate * dt;
+        } else {
+            // Decay any leftover user acceleration without accepting new input.
+            this.scrollDelta *= damp;
+            this.scrollRate *= damp;
         }
 
         if (scopedDt > 0) {

@@ -75,13 +75,15 @@ export class OglWheelVega extends OglVegaCarousel {
     private previousIndex = -1;
     private prevScrollAngle = 0;
     private hasScrollAngle = false;
+    /** True until scroll passes the host top by `atTopLeavePx`; true again only at that top. */
+    private pageAtTop = true;
+    private readonly atTopLeavePx = 8;
+    /** Scroll position where the host top meets the viewport top. Absent until mount. */
+    private elementTopTrigger?: ScrollTrigger;
     /** `undefined` until the first report, `null` when there is no image. */
     private lastImageIndex: number | null | undefined = undefined;
 
-    /** Authored `circleVisiblePart`, kept apart from the value scroll writes. */
-    private visiblePartStart = DEFAULT_PRESET.circle.circleVisiblePart;
-    private visiblePartTrigger?: ScrollTrigger;
-    private readonly visiblePartEase = gsap.parseEase('power2.out');
+    private visiblePartTimeline?: gsap.core.Timeline;
 
     protected override presetFor(key: BreakpointPresetKey) {
         return BREAKPOINT_PRESETS[key];
@@ -127,8 +129,24 @@ export class OglWheelVega extends OglVegaCarousel {
         this.resetNearest();
     }
 
+    public override onMounted(parent: HTMLElement): void {
+        super.onMounted(parent);
+        this.ensureElementTopTrigger();
+    }
+
+    public override onUnmounted(): void {
+        this.killElementTopTrigger();
+        super.onUnmounted();
+    }
+
+    protected override setupScene(): void {
+        this.ensureElementTopTrigger();
+        super.setupScene();
+    }
+
     protected override disposeScene(): void {
         this.killVisiblePartTrigger();
+        this.killElementTopTrigger();
         super.disposeScene();
     }
 
@@ -136,9 +154,11 @@ export class OglWheelVega extends OglVegaCarousel {
         this.syncWheel();
     }
 
-    protected override applyBreakpointExtras(preset: SharedLayoutPreset): void {
-        const start = (preset.circle as { circleVisiblePart?: number }).circleVisiblePart;
-        if (start !== undefined) this.visiblePartStart = start;
+    protected override applyBreakpointExtras(_preset: SharedLayoutPreset): void {
+        this.refreshVisiblePartScroll();
+    }
+
+    protected override updateCameraOnResize(): void {
         this.refreshVisiblePartScroll();
     }
 
@@ -173,45 +193,76 @@ export class OglWheelVega extends OglVegaCarousel {
         return timeline;
     }
 
-    /** Page scroll from 0 to `visiblePartScroll` viewport heights drives the camera zoom. */
+    /**
+     * From the host top at the viewport top, across `visiblePartScroll` of the host height.
+     * Camera Y and ring Z are the two tweened properties; `scrub` ties them to the scrollbar.
+     * The `end` function runs on ScrollTrigger refresh, not on the frame path.
+     */
     private ensureVisiblePartTrigger(): void {
         this.killVisiblePartTrigger();
-        this.visiblePartTrigger = ScrollTrigger.create({
-            trigger: document.documentElement,
-            start: 0,
-            end: () => window.innerHeight * this.planes.circle.visiblePartScroll,
-            scrub: true,
-            onUpdate: (self) => this.applyVisiblePart(self.progress)
+        if (!this.camera || !this.meshesGroup || !this.parentElement) return;
+
+        const trigger = this.parentElement;
+        this.visiblePartTimeline = gsap.timeline({
+            scrollTrigger: {
+                trigger,
+                start: 'top top',
+                end: () => `+=${trigger.offsetHeight * this.planes.circle.visiblePartScroll}`,
+                scrub: 0.4,
+                invalidateOnRefresh: true
+            }
         });
-        this.applyVisiblePart(this.visiblePartTrigger.progress);
-    }
 
-    /** Recalculate the end distance and write the visible part for the current scroll. */
-    public refreshVisiblePartScroll(): void {
-        this.visiblePartTrigger?.refresh();
-        this.applyVisiblePart(this.visiblePartTrigger?.progress ?? 0);
-    }
-
-    private applyVisiblePart(progress: number): void {
-        const eased = this.visiblePartEase(progress);
-        this.planes.circle.circleVisiblePart = gsap.utils.interpolate(
-            this.visiblePartStart,
-            this.planes.circle.maxCircleVisiblePart,
-            eased
+        this.visiblePartTimeline.fromTo(
+            this.camera.position,
+            { y: () => this.cameraHeightFor(this.planes.circle.circleVisiblePart) },
+            {
+                y: () => this.cameraHeightFor(this.planes.circle.maxCircleVisiblePart),
+                ease: 'power2.out',
+                duration: 1
+            },
+            0
         );
-        if (this.meshesGroup) {
-            this.meshesGroup.position.z = gsap.utils.interpolate(
-                0,
-                this.planes.circle.translateZ,
-                eased
-            );
-        }
+        this.visiblePartTimeline.fromTo(
+            this.meshesGroup.position,
+            { z: 0 },
+            {
+                z: () => this.planes.circle.translateZ,
+                ease: 'power2.out',
+                duration: 1
+            },
+            0
+        );
+    }
+
+    /** Recalculate the scroll distance and the two Y/Z endpoints. */
+    public refreshVisiblePartScroll(): void {
         this.placeCamera();
+        this.visiblePartTimeline?.invalidate();
+        this.visiblePartTimeline?.scrollTrigger?.refresh();
+        this.elementTopTrigger?.refresh();
     }
 
     private killVisiblePartTrigger(): void {
-        this.visiblePartTrigger?.kill();
-        this.visiblePartTrigger = undefined;
+        this.visiblePartTimeline?.scrollTrigger?.kill();
+        this.visiblePartTimeline?.kill();
+        this.visiblePartTimeline = undefined;
+    }
+
+    /** One layout read at create and on ScrollTrigger refresh. The frame path only reads `.start`. */
+    private ensureElementTopTrigger(): void {
+        if (this.elementTopTrigger || !this.parentElement) return;
+
+        this.elementTopTrigger = ScrollTrigger.create({
+            trigger: this.parentElement,
+            start: 'top top',
+            end: 'bottom top'
+        });
+    }
+
+    private killElementTopTrigger(): void {
+        this.elementTopTrigger?.kill();
+        this.elementTopTrigger = undefined;
     }
 
     /** Rest pose, then the intro. Scale waits until this timeline completes. */
@@ -259,21 +310,15 @@ export class OglWheelVega extends OglVegaCarousel {
     public override placeCamera(): void {
         if (!this.camera) return;
 
-        const { gap, size, circle } = this.planes;
-        const count = Math.max(this.minPlaneCount, this.planes.count);
-        const radius = circleRadius(count, size, gap);
-        const diameter = circleOuterDiameter(radius, size);
         const aspect = this.resolution.ratio > 0 ? this.resolution.ratio : 1;
-        const height = perspectiveHeight(
-            diameter,
-            circle.circleVisiblePart,
-            this.camera.fov,
-            aspect
-        );
 
         // Looking straight down is parallel to the default up axis.
         this.camera.up.set(0, 0, -1);
-        this.camera.position.set(0, height, 0);
+        this.camera.position.x = 0;
+        this.camera.position.z = 0;
+        if (!this.visiblePartTimeline) {
+            this.camera.position.y = this.cameraHeightFor(this.planes.circle.circleVisiblePart);
+        }
         this.camera.lookAt([0, 0, 0]);
 
         this.camera.perspective({
@@ -282,6 +327,18 @@ export class OglWheelVega extends OglVegaCarousel {
             fov: this.camera.fov,
             aspect
         });
+    }
+
+    /** Camera height so `visiblePart` of the canvas width is filled by the ring diameter. */
+    private cameraHeightFor(visiblePart: number): number {
+        if (!this.camera) return 0;
+
+        const { gap, size } = this.planes;
+        const count = Math.max(this.minPlaneCount, this.planes.count);
+        const radius = circleRadius(count, size, gap);
+        const diameter = circleOuterDiameter(radius, size);
+        const aspect = this.resolution.ratio > 0 ? this.resolution.ratio : 1;
+        return perspectiveHeight(diameter, visiblePart, this.camera.fov, aspect);
     }
 
     protected override async mountDevtools(): Promise<void> {
@@ -327,13 +384,19 @@ export class OglWheelVega extends OglVegaCarousel {
             return;
         }
 
+        const atTop = this.syncPageAtTop();
+
         if (nearest < 0) {
             this.reportNearestImage(null);
-            this.syncNearestScale(-1, size);
+
             return;
         }
 
         this.reportNearestImage(nearest % this.imageUrls.length);
+        if (!atTop) {
+            this.releaseNearestScale(size);
+            return;
+        }
         this.syncNearestScale(nearest, size);
     }
 
@@ -375,6 +438,15 @@ export class OglWheelVega extends OglVegaCarousel {
         return nearest;
     }
 
+    /** Distance past the host top. Leave after a few pixels; come back only at 0, so a 1–2px bounce does not flip the scale. */
+    private syncPageAtTop(): boolean {
+        const start = this.elementTopTrigger?.start ?? 0;
+        const y = window.scrollY - start;
+        if (y <= 0) this.pageAtTop = true;
+        else if (y > this.atTopLeavePx) this.pageAtTop = false;
+        return this.pageAtTop;
+    }
+
     private wrapAngle(angle: number): number {
         const tau = Math.PI * 2;
         angle %= tau;
@@ -407,6 +479,16 @@ export class OglWheelVega extends OglVegaCarousel {
             if (Math.abs(mesh.scale.x - size) <= 1e-4) continue;
             mesh.scale.set(size, size, size);
         }
+    }
+
+    /** Ease the emphasized mesh back to the base size. Later frames must not snap it. */
+    private releaseNearestScale(size: number): void {
+        if (this.currentIndex < 0) return;
+
+        const previous = this.currentIndex;
+        this.previousIndex = previous;
+        this.currentIndex = -1;
+        this.tweenMeshScale(previous, size);
     }
 
     /** Scale only the nearest mesh. The tween runs when its index changes. */
@@ -461,6 +543,7 @@ export class OglWheelVega extends OglVegaCarousel {
         this.previousIndex = -1;
         this.prevScrollAngle = 0;
         this.hasScrollAngle = false;
+        this.pageAtTop = true;
         this.lastImageIndex = undefined;
     }
 

@@ -9,7 +9,7 @@ export type LayoutPreset = {
         /** Fraction of the canvas width filled by the ring's outer diameter. `0.7` = 70%. */
         circleVisiblePart: number;
         maxCircleVisiblePart: number;
-        /** Page scroll, in viewport heights, over which the visible part reaches its max. */
+        /** Fraction of the host height over which the visible part reaches its max. */
         visiblePartScroll: number;
         /** Ring Z at the end of that same scroll. Starts at 0. */
         translateZ: number;
