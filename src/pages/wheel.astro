@@ -1,6 +1,6 @@
 ---
 import Layout from '@layouts/Layout.astro';
-import '@scripts/webgl/web-component/loco-canvas.css';
+import WheelVega from '@components/WheelVega/WheelVega.astro';
 
 import img0 from '@images/tsl/img-0.jpg';
 import img1 from '@images/tsl/img-1.jpg';
@@ -23,53 +23,46 @@ import img17 from '@images/tsl/img-17.jpg';
 import img18 from '@images/tsl/img-18.jpg';
 import img19 from '@images/tsl/img-19.jpg';
 
-const srcImages = [
-    img0,
-    img1,
-    img2,
-    img3,
-    img4,
-    img5,
-    img6,
-    img7,
-    img8,
-    img9,
-    img10,
-    img11,
-    img12,
-    img13,
-    img14,
-    img15,
-    img16,
-    img17,
-    img18,
-    img19
-].map((image) => image.src);
+const slides = [
+    { image: img0, name: 'Épinette' },
+    { image: img1, name: 'Ananas' },
+    { image: img2, name: 'Chêne' },
+    { image: img3, name: 'Fougère' },
+    { image: img4, name: 'Lierre' },
+    { image: img5, name: 'Bouleau' },
+    { image: img6, name: 'Palmier' },
+    { image: img7, name: 'Olivier' },
+    { image: img8, name: 'Lavande' },
+    { image: img9, name: 'Romarin' },
+    { image: img10, name: 'Basilic' },
+    { image: img11, name: 'Menthe' },
+    { image: img12, name: 'Sauge' },
+    { image: img13, name: 'Thym' },
+    { image: img14, name: 'Camélia' },
+    { image: img15, name: 'Jasmin' },
+    { image: img16, name: 'Mimosa' },
+    { image: img17, name: 'Orchidée' },
+    { image: img18, name: 'Pivoine' },
+    { image: img19, name: 'Verveine' }
+];
 ---
 
 <Layout title="Wheel">
     <div class="h-[10vh] w-full"></div>
-    <div class="relative h-screen w-full">
-        <c-loco-canvas data-component-id="OglWheelVega" data-src-images={JSON.stringify(srcImages)}
-        ></c-loco-canvas>
-        <div
-            class="absolute top-1/2 left-1/2 h-[80%] w-48 -translate-x-1/2 -translate-y-1/2 rounded-md border bg-white"
-        >
-        </div>
-    </div>
+    <WheelVega slides={slides} />
     <div class="h-screen w-full"></div>
+
+    <script>
+        import { $CanvasManager } from '@scripts/webgl/core/CanvasManager';
+        import { OglWheelVega } from '@scripts/webgl/components/OglWheelVega/OglWheelVega';
+
+        if (!$CanvasManager.has(OglWheelVega.id)) {
+            $CanvasManager.register(OglWheelVega.id, OglWheelVega);
+        }
+
+        await $CanvasManager.init();
+        $CanvasManager.start();
+
+        await import('@scripts/webgl/web-component');
+    </script>
 </Layout>
-
-<script>
-    import { $CanvasManager } from '@scripts/webgl/core/CanvasManager';
-    import { OglWheelVega } from '@scripts/webgl/components/OglWheelVega/OglWheelVega';
-
-    if (!$CanvasManager.has(OglWheelVega.id)) {
-        $CanvasManager.register(OglWheelVega.id, OglWheelVega);
-    }
-
-    await $CanvasManager.init();
-    $CanvasManager.start();
-
-    await import('@scripts/webgl/web-component');
-</script>

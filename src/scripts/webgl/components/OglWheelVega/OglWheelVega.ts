@@ -80,7 +80,7 @@ export class OglWheelVega extends OglVegaCarousel {
     private readonly atTopLeavePx = 8;
     /** Scroll position where the host top meets the viewport top. Absent until mount. */
     private elementTopTrigger?: ScrollTrigger;
-    /** `undefined` until the first report, `null` when there is no image. */
+    /** `undefined` until the first report, `null` when the label should be Plants. */
     private lastImageIndex: number | null | undefined = undefined;
 
     private visiblePartTimeline?: gsap.core.Timeline;
@@ -272,6 +272,7 @@ export class OglWheelVega extends OglVegaCarousel {
         this.previousIndex = -1;
         this.lastImageIndex = undefined;
         this.resetScrollPose();
+        this.reportNearestImage(null, true);
         this.playIntro();
     }
 
@@ -361,7 +362,6 @@ export class OglWheelVega extends OglVegaCarousel {
 
     /** Scroll pose: plane positions, nearest image, and its scale. */
     private syncWheel(): void {
-        console.log('travel', this.scroll.travel);
         const count = this.ringCount;
         if (count === 0) return;
 
@@ -386,17 +386,13 @@ export class OglWheelVega extends OglVegaCarousel {
 
         const atTop = this.syncPageAtTop();
 
-        if (nearest < 0) {
+        if (nearest < 0 || !atTop) {
             this.reportNearestImage(null);
-
+            if (!atTop) this.releaseNearestScale(size);
             return;
         }
 
         this.reportNearestImage(nearest % this.imageUrls.length);
-        if (!atTop) {
-            this.releaseNearestScale(size);
-            return;
-        }
         this.syncNearestScale(nearest, size);
     }
 
@@ -455,19 +451,18 @@ export class OglWheelVega extends OglVegaCarousel {
         return angle;
     }
 
-    private reportNearestImage(index: number | null): void {
-        if (index === this.lastImageIndex) return;
+    private reportNearestImage(index: number | null, immediate = false): void {
+        if (index === this.lastImageIndex && !immediate) return;
 
-        if (index === null) this.log('aucune image');
-        else this.log(index);
+        if (index === null) {
+            if (!immediate && this.pageAtTop) this.log('aucune image');
+        } else this.log(index);
 
         this.lastImageIndex = index;
-        if (index === null) return;
-
         this.parentElement?.dispatchEvent(
             new CustomEvent('wheel-nearest', {
                 bubbles: true,
-                detail: { index }
+                detail: immediate ? { index, immediate: true } : { index }
             })
         );
     }

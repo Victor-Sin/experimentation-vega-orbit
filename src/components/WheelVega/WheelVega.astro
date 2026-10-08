@@ -1,0 +1,55 @@
+---
+import '@scripts/webgl/web-component/loco-canvas.css';
+
+interface Slide {
+    image: { src: string };
+    name: string;
+}
+
+interface Props {
+    slides: Slide[];
+    class?: string;
+}
+
+const { slides, class: propsClass } = Astro.props;
+const srcImages = slides.map((slide) => slide.image.src);
+---
+
+<c-wheel-vega class:list={['relative block h-screen w-full max-md:bg-amber-400', propsClass]}>
+    <c-loco-canvas data-component-id="OglWheelVega" data-src-images={JSON.stringify(srcImages)}
+    ></c-loco-canvas>
+    <div
+        class="absolute top-0 left-0 container flex h-full w-full items-center justify-between text-2xl font-bold tracking-tighter"
+    >
+        <div class="overflow-hidden">
+            <p>Powered by</p>
+        </div>
+        <div class="heading-lg relative font-medium" data-wheel="ingredients">
+            <p class="c-wheel-vega_label" data-wheel-label="plants" data-state="shown">Plants</p>
+            {
+                slides.map((slide) => (
+                    <p class="c-wheel-vega_label" data-wheel="ingredient" data-state="hidden">
+                        {slide.name}
+                    </p>
+                ))
+            }
+        </div>
+        <div class="overflow-hidden">
+            <p>Build for life</p>
+        </div>
+    </div>
+</c-wheel-vega>
+
+<style>
+    .c-wheel-vega_label[data-state='hidden'] {
+        position: absolute;
+        top: 0;
+        left: 0;
+        opacity: 0;
+        pointer-events: none;
+    }
+</style>
+
+<script>
+    import('./WheelVega.ts');
+</script>
