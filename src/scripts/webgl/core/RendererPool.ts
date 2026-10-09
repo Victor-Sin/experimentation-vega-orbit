@@ -1,5 +1,5 @@
-import { createLogger } from '#utils/log/logger.ts';
-import { hash } from '#utils/string.ts';
+import { createLogger } from '../extr/logger.ts';
+import { hash } from '../extr/string.ts';
 import { CanvasComponent } from './CanvasComponent.ts';
 
 // Mutable per-use or non-identity options that must not affect renderer pooling

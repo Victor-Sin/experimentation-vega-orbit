@@ -1,8 +1,8 @@
-import { nextTick } from '#utils/async/wait.ts';
-import { createLogger, type Logger } from '#utils/log/logger.ts';
-import { useDPR, type UseDPRInstance } from '#utils/screen/useDPR.ts';
-import { useResize, type UseResizeInstance } from '#utils/screen/useResize.ts';
-import { createUUID } from '#utils/string.ts';
+import { nextTick } from '../extr/wait.ts';
+import { createLogger, type Logger } from '../extr/logger.ts';
+import { useDPR, type UseDPRInstance } from '../extr/useDPR.ts';
+import { useResize, type UseResizeInstance } from '../extr/useResize.ts';
+import { createUUID } from '../extr/string.ts';
 
 import { $CanvasManager, type CanvasManagerClock, type Resolution } from './CanvasManager.ts';
 

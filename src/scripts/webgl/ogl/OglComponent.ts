@@ -1,7 +1,7 @@
 import { Renderer, Vec4, type OGLRenderingContext, type RendererOptions } from 'ogl';
 
-import { $device } from '#stores/device.ts';
-import { boolean } from '#utils/convert.ts';
+import { boolean } from '../extr/convert.ts';
+import { $device } from '../extr/device.ts';
 import { CanvasComponent } from '../core/CanvasComponent.ts';
 import { $CanvasManager, type Resolution } from '../core/CanvasManager.ts';
 import { stableKey, type RendererEntry, type RendererEntryData } from '../core/RendererPool.ts';

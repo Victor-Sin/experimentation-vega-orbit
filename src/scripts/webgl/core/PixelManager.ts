@@ -1,4 +1,4 @@
-import { clamp } from '#utils/maths.ts';
+import { clamp } from '../extr/maths.ts';
 
 import type { CanvasComponent } from './CanvasComponent.ts';
 

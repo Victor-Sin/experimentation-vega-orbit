@@ -13,7 +13,7 @@ import {
 
 import gsap from 'gsap';
 
-import { $device } from '#stores/device.ts';
+import { $device } from '../../extr/device.ts';
 
 import type { CanvasManagerClock } from '../../core/CanvasManager.ts';
 import { OglComponent } from '../../ogl/OglComponent.ts';

@@ -1,6 +1,6 @@
-import type { Logger } from '#utils/log/logger.ts';
-import { useScreen, type UseScreenInstance } from '#utils/screen/useScreen.ts';
-import { lcfirst } from '#utils/string.ts';
+import type { Logger } from '../extr/logger.ts';
+import { useScreen, type UseScreenInstance } from '../extr/useScreen.ts';
+import { lcfirst } from '../extr/string.ts';
 
 import type { CanvasComponent } from './CanvasComponent.ts';
 
