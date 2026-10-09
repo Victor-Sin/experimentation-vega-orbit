@@ -21,10 +21,10 @@ const srcImages = slides.map((slide) => slide.image.src);
         propsClass
     ]}
 >
-    <c-loco-canvas data-component-id="OglWheelVega" data-src-images={JSON.stringify(srcImages)}
+    <c-loco-canvas data-component-id="OglWheelVega" data-src-images={JSON.stringify(srcImages)} x
     ></c-loco-canvas>
     <div
-        class="absolute top-0 left-0 container flex h-full w-full items-center justify-between overflow-hidden text-2xl font-bold tracking-tighter"
+        class="absolute top-1/2 left-1/2 container flex w-full -translate-x-1/2 -translate-y-1/2 items-center justify-between overflow-hidden text-2xl font-bold tracking-tighter max-sm:flex-col max-sm:gap-fluid-xs sm:h-full"
         data-wheel="group"
     >
         <div class="overflow-hidden" data-wheel="powered">

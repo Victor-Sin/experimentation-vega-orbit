@@ -1,4 +1,5 @@
 import { ComponentElement } from '@locomotivemtl/component-manager';
+import { $breakpoints } from '@scripts/stores/deviceStatus';
 import { OglWheelVega } from '@scripts/webgl/components/OglWheelVega/OglWheelVega';
 import { CanvasElement } from '@scripts/webgl/web-component/CanvasElement';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -27,7 +28,10 @@ export class WheelVega extends HTMLElement {
     private phase: 'idle' | 'out' | 'in' = 'idle';
     private fade?: gsap.core.Tween;
     private visiblePartTimeline?: gsap.core.Timeline;
+    private visiblePartMedia?: gsap.MatchMedia;
     private introTimeline?: gsap.core.Timeline;
+    private wordsPowered?: SplitText;
+    private wordsBuild?: SplitText;
 
     connectedCallback(): void {
         this.group = this.querySelector<HTMLElement>('[data-wheel="group"]');
@@ -46,6 +50,7 @@ export class WheelVega extends HTMLElement {
     disconnectedCallback(): void {
         this.unbindWheel();
         this.killFades();
+        this.killAnimations();
         this.removeEventListener('wheel-nearest', this.onNearest);
         this.plants = null;
         this.ingredients = [];
@@ -59,7 +64,7 @@ export class WheelVega extends HTMLElement {
         const wheel = this.canvas?.component as OglWheelVega | undefined;
 
         if (wheel?.isMounted) {
-            this.oglWheelVega = wheel;
+            this.mountVisiblePart(wheel);
             return;
         }
 
@@ -67,22 +72,32 @@ export class WheelVega extends HTMLElement {
     }
 
     private onCanvasMounted = (event: Event): void => {
+        this.canvas?.removeEventListener(CanvasElement.EVENTS.CANVAS_MOUNTED, this.onCanvasMounted);
         const { component } = (event as CustomEvent<{ component: OglWheelVega }>).detail;
-        this.oglWheelVega = component;
+        this.mountVisiblePart(component);
+    };
+
+    private mountVisiblePart(wheel: OglWheelVega): void {
+        this.visiblePartMedia?.revert();
+        this.visiblePartMedia = undefined;
+        this.visiblePartTimeline?.kill();
+        this.oglWheelVega = wheel;
         const trigger = this.oglWheelVega.parentElement;
 
-        this.visiblePartTimeline = gsap.timeline({
-            scrollTrigger: {
-                trigger,
-                start: 'top top',
-                end: () =>
-                    `+=${trigger.offsetHeight * this.oglWheelVega.planes.circle.visiblePartScroll}`,
-                scrub: 0.4,
-                invalidateOnRefresh: true
-            }
-        });
-        this.visiblePartTimeline
-            .fromTo(
+        const sm = $breakpoints.get().sm;
+        this.visiblePartMedia = gsap.matchMedia();
+        this.visiblePartMedia.add(`(min-width: ${sm})`, () => {
+            this.visiblePartTimeline = gsap.timeline({
+                scrollTrigger: {
+                    trigger,
+                    start: 'top top',
+                    end: () =>
+                        `+=${trigger.offsetHeight * this.oglWheelVega.planes.circle.visiblePartScroll}`,
+                    scrub: 0.4,
+                    invalidateOnRefresh: true
+                }
+            });
+            this.visiblePartTimeline.fromTo(
                 this.group,
                 { y: 0 },
                 {
@@ -93,29 +108,37 @@ export class WheelVega extends HTMLElement {
                     duration: 1,
                     ease: 'power2.out'
                 }
-            )
-            .fromTo(
-                this.powered,
-                { xPercent: 0 },
-                { xPercent: -200, duration: 1, ease: 'power2.out' },
-                '<'
-            )
-            .fromTo(
-                this.build,
-                { xPercent: 0 },
-                { xPercent: 200, duration: 1, ease: 'power2.out' },
-                '<'
             );
-    };
+
+            this.visiblePartTimeline
+                ?.fromTo(
+                    this.powered,
+                    { xPercent: 0 },
+                    { xPercent: -200, duration: 1, ease: 'power2.out' },
+                    '<'
+                )
+                .fromTo(
+                    this.build,
+                    { xPercent: 0 },
+                    { xPercent: 200, duration: 1, ease: 'power2.out' },
+                    '<'
+                );
+        });
+    }
 
     private animIntro = (): void => {
-        const wordsPowered = SplitText.create(this.powered, { type: 'words' });
-        const wordsBuild = SplitText.create(this.build, { type: 'words' });
+        this.introTimeline?.kill();
+        this.introTimeline = undefined;
+        this.wordsPowered?.revert();
+        this.wordsBuild?.revert();
+
+        this.wordsPowered = SplitText.create(this.powered, { type: 'words' });
+        this.wordsBuild = SplitText.create(this.build, { type: 'words' });
         const staggerAmount = 0.1;
         this.introTimeline = gsap
             .timeline({ delay: 1.5 })
             .fromTo(
-                wordsPowered.words,
+                this.wordsPowered.words,
                 { yPercent: 100 },
                 { yPercent: 0, duration: 1, ease: 'power2.out', stagger: staggerAmount }
             )
@@ -126,7 +149,7 @@ export class WheelVega extends HTMLElement {
                 '-=.75'
             )
             .fromTo(
-                wordsBuild.words,
+                this.wordsBuild.words,
                 { yPercent: 100 },
                 { yPercent: 0, duration: 1, ease: 'power2.out', stagger: staggerAmount },
                 '-=.75'
@@ -227,6 +250,19 @@ export class WheelVega extends HTMLElement {
             (label): label is HTMLElement => !!label
         );
         if (labels.length) gsap.killTweensOf(labels);
+    }
+
+    private killAnimations(): void {
+        this.visiblePartMedia?.revert();
+        this.visiblePartMedia = undefined;
+        this.visiblePartTimeline?.kill();
+        this.visiblePartTimeline = undefined;
+        this.introTimeline?.kill();
+        this.introTimeline = undefined;
+        this.wordsPowered?.revert();
+        this.wordsBuild?.revert();
+        this.wordsPowered = undefined;
+        this.wordsBuild = undefined;
     }
 
     private labelFor(target: LabelTarget): HTMLElement {
