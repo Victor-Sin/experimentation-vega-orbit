@@ -62,6 +62,7 @@ export class OglOrbitVega extends OglVegaCarousel {
     public bend = { ...DEFAULT_PRESET.bend };
     public cameraOffset = { zOffset: DEFAULT_PRESET.cameraOffset.zOffset };
     public override fisheye = { ...DEFAULT_PRESET.fisheye, fxaa: true };
+    public override scroll = { ...DEFAULT_PRESET.scroll, progress: 0 };
 
     private readonly distances: { value: number }[] = [];
     private readonly offset = new Vec3();

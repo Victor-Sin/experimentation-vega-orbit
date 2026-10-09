@@ -1,35 +1,142 @@
 import { ComponentElement } from '@locomotivemtl/component-manager';
+import { OglWheelVega } from '@scripts/webgl/components/OglWheelVega/OglWheelVega';
+import { CanvasElement } from '@scripts/webgl/web-component/CanvasElement';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { SplitText } from 'gsap/SplitText';
 import gsap from 'gsap';
+
+gsap.registerPlugin(ScrollTrigger);
+gsap.registerPlugin(SplitText);
 
 type LabelTarget = number | null;
 
 const FADE = { duration: 0.2, ease: 'power1.out' } as const;
 
 export class WheelVega extends HTMLElement {
+    private canvas: CanvasElement | null = null;
+    private oglWheelVega: OglWheelVega | null = null;
+    private group: HTMLElement | null = null;
     private plants: HTMLElement | null = null;
     private ingredients: HTMLElement[] = [];
+    private powered: HTMLElement | null = null;
+    private build: HTMLElement | null = null;
     /** Label in the flow. `null` is Plants. */
     private shown: LabelTarget = null;
     /** Latest requested label. Replaces any in-flight target. */
     private pending: LabelTarget | undefined = undefined;
     private phase: 'idle' | 'out' | 'in' = 'idle';
     private fade?: gsap.core.Tween;
+    private visiblePartTimeline?: gsap.core.Timeline;
+    private introTimeline?: gsap.core.Timeline;
 
     connectedCallback(): void {
+        this.group = this.querySelector<HTMLElement>('[data-wheel="group"]');
         this.plants = this.querySelector<HTMLElement>('[data-wheel-label="plants"]');
         this.ingredients = Array.from(
             this.querySelectorAll<HTMLElement>('[data-wheel="ingredient"]')
         );
+        this.powered = this.querySelector<HTMLElement>('[data-wheel="powered"]');
+        this.build = this.querySelector<HTMLElement>('[data-wheel="build"]');
         this.addEventListener('wheel-nearest', this.onNearest);
+
+        this.bindWheel();
+        this.animIntro();
     }
 
     disconnectedCallback(): void {
+        this.unbindWheel();
         this.killFades();
         this.removeEventListener('wheel-nearest', this.onNearest);
         this.plants = null;
         this.ingredients = [];
         this.pending = undefined;
         this.phase = 'idle';
+    }
+
+    /** Use `OglWheelVega` only after its canvas has finished mounting. */
+    private bindWheel(): void {
+        this.canvas = this.querySelector<CanvasElement>("[data-component-id='OglWheelVega']");
+        const wheel = this.canvas?.component as OglWheelVega | undefined;
+
+        if (wheel?.isMounted) {
+            this.oglWheelVega = wheel;
+            return;
+        }
+
+        this.canvas?.addEventListener(CanvasElement.EVENTS.CANVAS_MOUNTED, this.onCanvasMounted);
+    }
+
+    private onCanvasMounted = (event: Event): void => {
+        const { component } = (event as CustomEvent<{ component: OglWheelVega }>).detail;
+        this.oglWheelVega = component;
+        const trigger = this.oglWheelVega.parentElement;
+
+        this.visiblePartTimeline = gsap.timeline({
+            scrollTrigger: {
+                trigger,
+                start: 'top top',
+                end: () =>
+                    `+=${trigger.offsetHeight * this.oglWheelVega.planes.circle.visiblePartScroll}`,
+                scrub: 0.4,
+                invalidateOnRefresh: true
+            }
+        });
+        this.visiblePartTimeline
+            .fromTo(
+                this.group,
+                { y: 0 },
+                {
+                    y:
+                        trigger.offsetHeight *
+                        this.oglWheelVega.planes.circle.visiblePartScroll *
+                        0.15,
+                    duration: 1,
+                    ease: 'power2.out'
+                }
+            )
+            .fromTo(
+                this.powered,
+                { xPercent: 0 },
+                { xPercent: -200, duration: 1, ease: 'power2.out' },
+                '<'
+            )
+            .fromTo(
+                this.build,
+                { xPercent: 0 },
+                { xPercent: 200, duration: 1, ease: 'power2.out' },
+                '<'
+            );
+    };
+
+    private animIntro = (): void => {
+        const wordsPowered = SplitText.create(this.powered, { type: 'words' });
+        const wordsBuild = SplitText.create(this.build, { type: 'words' });
+        const staggerAmount = 0.1;
+        this.introTimeline = gsap
+            .timeline({ delay: 1.5 })
+            .fromTo(
+                wordsPowered.words,
+                { yPercent: 100 },
+                { yPercent: 0, duration: 1, ease: 'power2.out', stagger: staggerAmount }
+            )
+            .fromTo(
+                this.plants,
+                { opacity: 0 },
+                { opacity: 1, duration: 1, ease: 'power2.out' },
+                '-=.75'
+            )
+            .fromTo(
+                wordsBuild.words,
+                { yPercent: 100 },
+                { yPercent: 0, duration: 1, ease: 'power2.out', stagger: staggerAmount },
+                '-=.75'
+            );
+    };
+
+    private unbindWheel(): void {
+        this.canvas?.removeEventListener(CanvasElement.EVENTS.CANVAS_MOUNTED, this.onCanvasMounted);
+        this.canvas = null;
+        this.oglWheelVega = null;
     }
 
     private onNearest = (event: Event): void => {
@@ -43,59 +150,38 @@ export class WheelVega extends HTMLElement {
         }
 
         const target = detail.index ?? null;
-        if (typeof target === 'number' && !this.ingredients[target]) return;
-
         this.pending = target;
         if (this.phase === 'idle') this.startOut();
     };
 
     /** Fade out the label in the flow. A newer `pending` is applied when this ends. */
     private startOut(): void {
-        if (this.pending === undefined || this.pending === this.shown) {
+        if (this.pending === this.shown) {
             this.pending = undefined;
             this.phase = 'idle';
             return;
         }
 
         const current = this.labelFor(this.shown);
-        if (!current) {
-            this.fadeInPending();
-            return;
-        }
-
         this.phase = 'out';
-        const opacity = Number(gsap.getProperty(current, 'opacity'));
-        if (opacity <= 0.001) {
-            this.fadeInPending();
-            return;
-        }
-
         this.fade = gsap.to(current, {
             autoAlpha: 0,
             ...FADE,
             overwrite: 'auto',
-            onComplete: () => {
-                if (this.phase !== 'out') return;
-                this.fadeInPending();
-            }
+            onComplete: () => this.fadeInPending()
         });
     }
 
-    /** Fade in the latest pending label. The outgoing line leaves the flow first. */
+    /** Fade in the latest pending label. A different outgoing line leaves the flow first. */
     private fadeInPending(): void {
-        const target = this.pending;
-        const incoming = target === undefined ? null : this.labelFor(target);
-        if (target === undefined || !incoming) {
-            this.phase = 'idle';
-            this.fade = undefined;
-            return;
-        }
-
+        const target = this.pending as LabelTarget;
+        const incoming = this.labelFor(target);
         const outgoing = this.labelFor(this.shown);
+
         this.shown = target;
         this.phase = 'in';
 
-        if (outgoing && outgoing !== incoming) {
+        if (outgoing !== incoming) {
             gsap.set(outgoing, { autoAlpha: 0 });
             outgoing.dataset.state = 'hidden';
         }
@@ -111,11 +197,9 @@ export class WheelVega extends HTMLElement {
     }
 
     private finishIn(): void {
-        if (this.phase !== 'in') return;
-
         this.phase = 'idle';
         this.fade = undefined;
-        if (this.pending !== undefined && this.pending !== this.shown) this.startOut();
+        if (this.pending !== this.shown) this.startOut();
         else this.pending = undefined;
     }
 
@@ -145,9 +229,9 @@ export class WheelVega extends HTMLElement {
         if (labels.length) gsap.killTweensOf(labels);
     }
 
-    private labelFor(target: LabelTarget): HTMLElement | null {
-        if (target === null) return this.plants;
-        return this.ingredients[target] ?? null;
+    private labelFor(target: LabelTarget): HTMLElement {
+        if (target === null) return this.plants as HTMLElement;
+        return this.ingredients[target];
     }
 }
 

@@ -22,10 +22,19 @@ import fxaaFragment from './fxaa.frag?raw';
 
 export type BreakpointPresetKey = 'xs' | 'sm' | 'md' | 'desktop';
 
+/** Scroll tuning stored on a layout preset. `progress` stays live and is not part of this. */
+export type CarouselScrollPreset = {
+    idleSpeed: number;
+    influence: number;
+    damping: number;
+    travel: number;
+};
+
 export type SharedLayoutPreset = {
     gap: number;
     size: number;
     circle: object;
+    scroll: CarouselScrollPreset;
 };
 
 export type PlaneGeometrySpec = {
@@ -81,7 +90,7 @@ export abstract class OglVegaCarousel extends OglComponent {
     public scroll = {
         idleSpeed: 0.002,
         influence: 0.01,
-        damping: 6,
+        damping: 18,
         progress: 0,
         travel: OglVegaCarousel.SCROLL_TRAVEL
     };
@@ -328,6 +337,10 @@ export abstract class OglVegaCarousel extends OglComponent {
         this.planes.gap = preset.gap;
         this.planes.size = preset.size;
         Object.assign(this.planes.circle, preset.circle);
+        this.scroll.idleSpeed = preset.scroll.idleSpeed;
+        this.scroll.influence = preset.scroll.influence;
+        this.scroll.damping = preset.scroll.damping;
+        this.scroll.travel = preset.scroll.travel;
     }
 
     /** `syncLayout` + `placeCamera`, once the scene exists. */

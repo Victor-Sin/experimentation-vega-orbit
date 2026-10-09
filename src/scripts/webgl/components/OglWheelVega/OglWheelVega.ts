@@ -10,7 +10,12 @@ import {
     type SharedLayoutPreset
 } from '../OglVegaCarousel/OglVegaCarousel.ts';
 
-import { BREAKPOINT_PRESETS, DEFAULT_PRESET, MIN_PLANE_COUNT } from './OglWheelVega.config.ts';
+import {
+    BREAKPOINT_PRESETS,
+    DEFAULT_PRESET,
+    MIN_PLANE_COUNT,
+    type LayoutPreset
+} from './OglWheelVega.config.ts';
 import {
     circleOuterDiameter,
     circlePlane,
@@ -42,8 +47,47 @@ gsap.registerPlugin(ScrollTrigger);
 export class OglWheelVega extends OglVegaCarousel {
     static id = 'OglWheelVega';
 
+    /** Live floor for the devtools. Starts at `MIN_PLANE_COUNT`. */
+    public readonly planeFloor = { min: MIN_PLANE_COUNT };
+
+    private appliedMinPlaneCount = MIN_PLANE_COUNT;
+
     protected override get minPlaneCount(): number {
-        return MIN_PLANE_COUNT;
+        return this.planeFloor.min;
+    }
+
+    /**
+     * Change the plane floor. A floor above the meshes already created rebuilds
+     * the scene. A lower floor leaves the current count in place.
+     */
+    public setMinPlaneCount(value: number): void {
+        const next = Math.max(1, Math.round(value));
+        this.planeFloor.min = next;
+        if (next === this.appliedMinPlaneCount) return;
+
+        this.appliedMinPlaneCount = next;
+
+        if (!this.isInitialized) {
+            this.planes.count = Math.max(this.planes.count, next);
+            return;
+        }
+
+        if (next > this.meshes.length) {
+            this.planes.count = Math.max(this.planes.count, next);
+            this.rebuildScene();
+            return;
+        }
+
+        if (this.planes.count < next) {
+            this.planes.count = next;
+            this.syncLayout();
+            this.refreshVisiblePartScroll();
+        }
+    }
+
+    private rebuildScene(): void {
+        this.disposeScene();
+        this.setupScene();
     }
 
     public planes = {
@@ -52,6 +96,8 @@ export class OglWheelVega extends OglVegaCarousel {
         size: DEFAULT_PRESET.size,
         circle: { ...DEFAULT_PRESET.circle, origin: '+x' as '+x' | '-x' | '+z' | '-z' }
     };
+
+    public override scroll = { ...DEFAULT_PRESET.scroll, progress: 0 };
 
     /** Multiplier applied to `planes.size` for the mesh closest to the cardinal origin. */
     public nearestScale = 1.5;
@@ -154,7 +200,8 @@ export class OglWheelVega extends OglVegaCarousel {
         this.syncWheel();
     }
 
-    protected override applyBreakpointExtras(_preset: SharedLayoutPreset): void {
+    protected override applyBreakpointExtras(preset: SharedLayoutPreset): void {
+        this.setMinPlaneCount((preset as LayoutPreset).minPlaneCount);
         this.refreshVisiblePartScroll();
     }
 
@@ -456,7 +503,7 @@ export class OglWheelVega extends OglVegaCarousel {
 
         if (index === null) {
             if (!immediate && this.pageAtTop) this.log('aucune image');
-        } else this.log(index);
+        }
 
         this.lastImageIndex = index;
         this.parentElement?.dispatchEvent(

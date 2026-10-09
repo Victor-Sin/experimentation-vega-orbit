@@ -1,6 +1,16 @@
-import type { BreakpointPresetKey } from '../OglVegaCarousel/OglVegaCarousel.ts';
+import type {
+    BreakpointPresetKey,
+    CarouselScrollPreset
+} from '../OglVegaCarousel/OglVegaCarousel.ts';
 
 export type { BreakpointPresetKey };
+
+const DEFAULT_SCROLL: CarouselScrollPreset = {
+    idleSpeed: 0.002,
+    influence: 0.01,
+    damping: 18,
+    travel: 2
+};
 
 export enum ShapeType {
     row = 'row',
@@ -22,6 +32,7 @@ export type ShapePreset = {
         effect: number;
         scale: number;
     };
+    scroll: CarouselScrollPreset;
     circle: {
         radiusX: number;
         radiusY: number;
@@ -37,6 +48,7 @@ export const SHAPE_PRESETS: Record<ShapeType, ShapePreset> = {
         bend: { enabled: true, radius: 0.34, distanceFactor: 1, byDistance: true },
         cameraOffset: { zOffset: 0.01 },
         fisheye: { enabled: true, effect: -0.5, scale: 1.54 },
+        scroll: { ...DEFAULT_SCROLL },
         circle: { radiusX: 1.35, radiusY: 1.82, faceInward: true }
     },
     [ShapeType.row]: {
@@ -45,6 +57,7 @@ export const SHAPE_PRESETS: Record<ShapeType, ShapePreset> = {
         bend: { enabled: true, radius: 4.77, distanceFactor: 1, byDistance: true },
         cameraOffset: { zOffset: 1.51 },
         fisheye: { enabled: true, effect: -0.39, scale: 1.61 },
+        scroll: { ...DEFAULT_SCROLL },
         circle: { radiusX: 1.35, radiusY: 1.55, faceInward: true }
     }
 };
@@ -65,6 +78,7 @@ export const BREAKPOINT_PRESETS: Record<BreakpointPresetKey, ShapePreset> = {
         bend: { enabled: true, radius: 0.34, distanceFactor: 1, byDistance: true },
         cameraOffset: { zOffset: 0.01 },
         fisheye: { enabled: true, effect: -0.5, scale: 1.54 },
+        scroll: { ...DEFAULT_SCROLL },
         circle: { radiusX: 1.35, radiusY: 2.31, faceInward: true }
     },
     sm: {
@@ -73,6 +87,7 @@ export const BREAKPOINT_PRESETS: Record<BreakpointPresetKey, ShapePreset> = {
         bend: { enabled: true, radius: 0.34, distanceFactor: 1, byDistance: true },
         cameraOffset: { zOffset: 0.01 },
         fisheye: { enabled: true, effect: -0.5, scale: 1.54 },
+        scroll: { ...DEFAULT_SCROLL },
         circle: { radiusX: 1.35, radiusY: 2.31, faceInward: true }
     },
     md: {
@@ -81,6 +96,7 @@ export const BREAKPOINT_PRESETS: Record<BreakpointPresetKey, ShapePreset> = {
         bend: { enabled: true, radius: 0.34, distanceFactor: 1, byDistance: true },
         cameraOffset: { zOffset: 0.01 },
         fisheye: { enabled: true, effect: -0.5, scale: 1.54 },
+        scroll: { ...DEFAULT_SCROLL },
         circle: { radiusX: 1.35, radiusY: 2.04, faceInward: true }
     },
     desktop: {
@@ -89,6 +105,7 @@ export const BREAKPOINT_PRESETS: Record<BreakpointPresetKey, ShapePreset> = {
         bend: { ...DEFAULT_PRESET.bend },
         cameraOffset: { ...DEFAULT_PRESET.cameraOffset },
         fisheye: { ...DEFAULT_PRESET.fisheye },
+        scroll: { ...DEFAULT_PRESET.scroll },
         circle: { ...DEFAULT_PRESET.circle }
     }
 };

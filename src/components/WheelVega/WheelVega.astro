@@ -15,13 +15,19 @@ const { slides, class: propsClass } = Astro.props;
 const srcImages = slides.map((slide) => slide.image.src);
 ---
 
-<c-wheel-vega class:list={['relative block h-screen w-full max-md:bg-amber-400', propsClass]}>
+<c-wheel-vega
+    class:list={[
+        'relative block h-screen w-full max-md:bg-amber-400 max-sm:bg-blue-400 max-xs:bg-green-400',
+        propsClass
+    ]}
+>
     <c-loco-canvas data-component-id="OglWheelVega" data-src-images={JSON.stringify(srcImages)}
     ></c-loco-canvas>
     <div
-        class="absolute top-0 left-0 container flex h-full w-full items-center justify-between text-2xl font-bold tracking-tighter"
+        class="absolute top-0 left-0 container flex h-full w-full items-center justify-between overflow-hidden text-2xl font-bold tracking-tighter"
+        data-wheel="group"
     >
-        <div class="overflow-hidden">
+        <div class="overflow-hidden" data-wheel="powered">
             <p>Powered by</p>
         </div>
         <div class="heading-lg relative font-medium" data-wheel="ingredients">
@@ -34,7 +40,7 @@ const srcImages = slides.map((slide) => slide.image.src);
                 ))
             }
         </div>
-        <div class="overflow-hidden">
+        <div class="overflow-hidden" data-wheel="build">
             <p>Build for life</p>
         </div>
     </div>

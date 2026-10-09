@@ -6,6 +6,7 @@ import type { OglOrbitVega } from './OglOrbitVega.ts';
 /** lil-gui parameter panel — DEV only. */
 export function mountOglOrbitVegaInspector(host: OglOrbitVega): () => void {
     const gui = new GUI({ title: 'Cube' });
+    gui.close();
     const { planes, scroll, bend, cameraOffset, fisheye } = host;
 
     const layout = gui.addFolder('Layout');
@@ -73,9 +74,9 @@ export function mountOglOrbitVegaInspector(host: OglOrbitVega): () => void {
     radiusY.listen();
     faceInward.listen();
 
-    animation.add(scroll, 'idleSpeed', 0, 0.2, 0.001).name('Idle speed');
-    animation.add(scroll, 'influence', 0, 0.1, 0.0001).name('Scroll influence');
-    animation.add(scroll, 'damping', 0.1, 20, 0.1).name('Damping');
+    animation.add(scroll, 'idleSpeed', 0, 0.2, 0.001).name('Idle speed').listen();
+    animation.add(scroll, 'influence', 0, 0.1, 0.0001).name('Scroll influence').listen();
+    animation.add(scroll, 'damping', 0.1, 20, 0.1).name('Damping').listen();
     animation.add(scroll, 'travel', 0.5, 10, 0.1).name('Scroll travel').onChange(refresh).listen();
     animation.add(scroll, 'progress').name('Progress (debug)').listen();
 
@@ -102,6 +103,20 @@ export function mountOglOrbitVegaInspector(host: OglOrbitVega): () => void {
         .listen();
     postFolder.add(fisheye, 'scale', 0.1, 2, 0.01).name('Scale').onChange(refresh).listen();
     gui.addFolder('FXAA').add(fisheye, 'fxaa').name('Enabled').onChange(refresh);
+
+    let preset: object | undefined;
+    const presetActions = {
+        save(): void {
+            preset = gui.save();
+            load.enable();
+        },
+        load(): void {
+            if (preset) gui.load(preset);
+        }
+    };
+
+    gui.add(presetActions, 'save').name('Save');
+    const load = gui.add(presetActions, 'load').name('Load').disable();
 
     return () => gui.destroy();
 }

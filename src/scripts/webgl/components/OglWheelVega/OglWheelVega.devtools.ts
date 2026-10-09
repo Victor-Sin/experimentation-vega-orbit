@@ -1,11 +1,12 @@
 import GUI from 'lil-gui';
 
-import { MIN_PLANE_COUNT, type BreakpointPresetKey } from './OglWheelVega.config.ts';
+import type { BreakpointPresetKey } from './OglWheelVega.config.ts';
 import type { OglWheelVega } from './OglWheelVega.ts';
 
 /** lil-gui parameter panel — DEV only. */
 export function mountOglWheelVegaInspector(host: OglWheelVega): () => void {
     const gui = new GUI({ title: 'Cube' });
+    gui.close();
     const { planes, scroll, fisheye } = host;
 
     const layout = gui.addFolder('Layout');
@@ -18,7 +19,7 @@ export function mountOglWheelVegaInspector(host: OglWheelVega): () => void {
         host.refreshVisiblePartScroll();
     };
 
-    layout
+    const breakpointControl = layout
         .add(host, 'breakpoint', {
             Desktop: 'desktop',
             'max-xs': 'xs',
@@ -26,13 +27,34 @@ export function mountOglWheelVegaInspector(host: OglWheelVega): () => void {
             'max-md': 'md'
         })
         .name('Breakpoint')
-        .onChange((key: BreakpointPresetKey) => host.applyBreakpointPreset(key))
         .listen();
 
-    layout
-        .add(planes, 'count', MIN_PLANE_COUNT, planes.count, 1)
+    const countControl = layout
+        .add(planes, 'count', host.planeFloor.min, planes.count, 1)
         .name('Plane count')
         .onChange(refreshView)
+        .listen();
+
+    let countMax = planes.count;
+    const syncCountBounds = (): void => {
+        countMax = Math.max(countMax, host.planes.count, host.planeFloor.min);
+        countControl.max(countMax);
+        countControl.min(host.planeFloor.min);
+    };
+
+    breakpointControl.onChange((key: BreakpointPresetKey) => {
+        host.applyBreakpointPreset(key);
+        syncCountBounds();
+        for (const controller of gui.controllersRecursive()) controller.updateDisplay();
+    });
+
+    layout
+        .add(host.planeFloor, 'min', 1, 60, 1)
+        .name('Min plane count')
+        .onChange((value: number) => {
+            host.setMinPlaneCount(value);
+            syncCountBounds();
+        })
         .listen();
     layout.add(planes, 'gap', 0, 1, 0.01).name('Plane gap').onChange(refreshView).listen();
     layout.add(planes, 'size', 0, 2, 0.01).name('Plane size').onChange(refreshView).listen();
@@ -47,9 +69,9 @@ export function mountOglWheelVegaInspector(host: OglWheelVega): () => void {
         .name('Nearest scale')
         .onChange(refresh)
         .listen();
-    animation.add(scroll, 'idleSpeed', 0, 0.2, 0.001).name('Idle speed');
-    animation.add(scroll, 'influence', 0, 0.1, 0.0001).name('Scroll influence');
-    animation.add(scroll, 'damping', 0.1, 20, 0.1).name('Damping');
+    animation.add(scroll, 'idleSpeed', 0, 0.2, 0.001).name('Idle speed').listen();
+    animation.add(scroll, 'influence', 0, 0.1, 0.0001).name('Scroll influence').listen();
+    animation.add(scroll, 'damping', 0.1, 20, 0.1).name('Damping').listen();
     animation.add(scroll, 'travel', 0.5, 10, 0.1).name('Scroll travel').onChange(refresh).listen();
     animation.add(scroll, 'progress').name('Progress (debug)').listen();
 
@@ -61,17 +83,20 @@ export function mountOglWheelVegaInspector(host: OglWheelVega): () => void {
     introFolder.add(host, 'replayIntro').name('Replay');
 
     cameraFolder
-        .add(planes.circle, 'maxCircleVisiblePart', 0.1, 1.5, 0.01)
+        .add(planes.circle, 'maxCircleVisiblePart', 0.1, 3, 0.01)
         .name('Max visible part')
-        .onChange(() => host.refreshVisiblePartScroll());
+        .onChange(() => host.refreshVisiblePartScroll())
+        .listen();
     cameraFolder
-        .add(planes.circle, 'visiblePartScroll', 0.1, 2, 0.01)
-        .name('Visible part scroll')
-        .onChange(() => host.refreshVisiblePartScroll());
+        .add(planes.circle, 'circleVisiblePart', 0.1, 3, 0.01)
+        .name('Visible part')
+        .onChange(() => host.refreshVisiblePartScroll())
+        .listen();
     cameraFolder
         .add(planes.circle, 'translateZ', -8, 8, 0.01)
         .name('Translate Z')
-        .onChange(() => host.refreshVisiblePartScroll());
+        .onChange(() => host.refreshVisiblePartScroll())
+        .listen();
     cameraFolder
         .add(planes.circle, 'orthographic')
         .name('Orthographic')
